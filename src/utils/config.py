@@ -20,10 +20,25 @@ for d in [RAW_DIR, PROCESSED_DIR, DB_PATH.parent, MODELS_DIR]:
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 
 # Tournament years (2020 cancelled)
-TOURNAMENT_YEARS = [2019, 2021, 2022, 2023, 2024, 2025, 2026]
+TOURNAMENT_YEARS = [
+    2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018,
+    2019, 2021, 2022, 2023, 2024, 2025, 2026,
+]
 
-# Selection Sunday dates (day before first games)
+# Selection Sunday dates (MMDD) — used to pull Torvik ratings as-of that date
+# preventing post-Selection Sunday data leakage in training
 SELECTION_SUNDAY = {
+    2008: "0316",
+    2009: "0315",
+    2010: "0314",
+    2011: "0313",
+    2012: "0311",
+    2013: "0317",
+    2014: "0316",
+    2015: "0315",
+    2016: "0313",
+    2017: "0312",
+    2018: "0311",
     2019: "0317",
     2021: "0314",
     2022: "0313",
