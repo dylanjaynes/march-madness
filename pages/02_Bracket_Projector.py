@@ -419,76 +419,22 @@ if run_btn:
     if not valid:
         st.stop()
 
-    st.subheader("Projected Bracket")
+    # ── Step 1: pre-compute all pairwise win probs (single loading phase) ──────
+    _wp_cache.clear()
+    _precompute_win_probs(region_seed_team)
 
+    # ── Step 2: deterministic bracket (instant from cache) ────────────────────
     region_all_rounds: dict = {}
     region_winners_det: dict = {}
-
     for region in REGIONS:
-        with st.spinner(f"Projecting {region}..."):
-            region_all_rounds[region] = simulate_region(
-                region_seed_team[region], deterministic=True
-            )
-            region_winners_det[region] = region_all_rounds[region][-1][0]
+        region_all_rounds[region] = simulate_region(
+            region_seed_team[region], deterministic=True, use_cache=True
+        )
+        region_winners_det[region] = region_all_rounds[region][-1][0]
 
-    # ── Display bracket results ────────────────────────────────────────────────
-    result_tabs = st.tabs(REGIONS + ["🏆 Final Four"])
-
-    round_labels = {
-        1: "R64 → R32", 2: "R32 → S16", 3: "S16 → E8", 4: "Elite Eight"
-    }
-
-    for region, rtab in zip(REGIONS, result_tabs[:4]):
-        with rtab:
-            all_rounds = region_all_rounds[region]
-
-            for ri in range(1, len(all_rounds)):
-                label = round_labels.get(ri, f"Round {ri}")
-                st.markdown(f"#### {label}")
-                survivors = all_rounds[ri]
-                prev = all_rounds[ri - 1]
-
-                # Show game cards: each survivor beat one of two teams from prev round
-                prev_per_winner = len(prev) // len(survivors)
-                cols = st.columns(len(survivors))
-                for ci, (team, seed) in enumerate(survivors):
-                    with cols[ci]:
-                        # Find the opponent they beat
-                        start = ci * prev_per_winner
-                        prev_slot = prev[start: start + prev_per_winner]
-                        opp = next((t for t, s in prev_slot if t != team), "?")
-                        opp_seed = next((s for t, s in prev_slot if t != team), "?")
-                        st.success(f"**#{seed} {team}**\ndef. #{opp_seed} {opp}")
-
-                st.markdown("")  # spacer
-
-            winner, wseed = region_winners_det[region]
-            st.markdown(f"### 🏆 {region} Winner: **#{wseed} {winner}**")
-
-    with result_tabs[4]:
-        st.subheader("Final Four & Championship")
-        with st.spinner("Projecting Final Four..."):
-            f4_games, champion = simulate_final_four(region_winners_det, deterministic=True)
-
-        f4_df = pd.DataFrame(f4_games)[["Round", "Matchup", "Model Pick", "Opponent", "Pick Win Prob", "Model Spread", "Winner"]]
-        st.dataframe(f4_df, use_container_width=True, hide_index=True)
-        st.caption("**Model Pick** = team the model projects to win. **Pick Win Prob** = that team's win probability. **Model Spread** = projected margin in betting convention (negative = pick is favored).")
-        st.markdown(f"## 🏆 National Champion: **{champion[0]}** (#{champion[1]} seed)")
-
-    st.divider()
-
-    # ── Monte Carlo ────────────────────────────────────────────────────────────
-    st.subheader(f"Monte Carlo Probabilities ({n_sims:,} simulations)")
-
-    # Step 1: pre-compute all pairwise win probs (once, ~10s) → sims become instant
-    _wp_cache.clear()  # clear any stale cache from previous run
-    with st.spinner("Computing win probabilities for all matchups..."):
-        _precompute_win_probs(region_seed_team)
-
-    # Step 2: run simulations using only cache lookups (no model calls)
+    # ── Step 3: Monte Carlo simulations (instant from cache) ──────────────────
     champion_counts: dict = defaultdict(int)
     round_adv: dict = defaultdict(lambda: defaultdict(int))
-
     for sim in range(n_sims):
         sim_winners = {}
         for region in REGIONS:
@@ -499,15 +445,52 @@ if run_btn:
             for ri, survivors in enumerate(sim_rounds[1:], 2):
                 for team, seed in survivors:
                     round_adv[team][ri] += 1
-
         _, sim_champ = simulate_final_four(
             sim_winners, deterministic=False, use_cache=True
         )
         champion_counts[sim_champ[0]] += 1
 
-    st.caption(f"✅ {n_sims:,} simulations complete")
+    # ── Display: bracket tabs ──────────────────────────────────────────────────
+    st.subheader("Projected Bracket")
+    result_tabs = st.tabs(REGIONS + ["🏆 Final Four"])
+    round_labels = {1: "R64 → R32", 2: "R32 → S16", 3: "S16 → E8", 4: "Elite Eight"}
 
-    # Champion probability chart
+    for region, rtab in zip(REGIONS, result_tabs[:4]):
+        with rtab:
+            all_rounds = region_all_rounds[region]
+            for ri in range(1, len(all_rounds)):
+                label = round_labels.get(ri, f"Round {ri}")
+                st.markdown(f"#### {label}")
+                survivors = all_rounds[ri]
+                prev = all_rounds[ri - 1]
+                prev_per_winner = len(prev) // len(survivors)
+                cols = st.columns(len(survivors))
+                for ci, (team, seed) in enumerate(survivors):
+                    with cols[ci]:
+                        start = ci * prev_per_winner
+                        prev_slot = prev[start: start + prev_per_winner]
+                        opp = next((t for t, s in prev_slot if t != team), "?")
+                        opp_seed = next((s for t, s in prev_slot if t != team), "?")
+                        st.success(f"**#{seed} {team}**\ndef. #{opp_seed} {opp}")
+                st.markdown("")
+
+            winner, wseed = region_winners_det[region]
+            st.markdown(f"### 🏆 {region} Winner: **#{wseed} {winner}**")
+
+    with result_tabs[4]:
+        st.subheader("Final Four & Championship")
+        # Final Four display calls project_game directly for spreads/win probs
+        f4_games, champion = simulate_final_four(region_winners_det, deterministic=True)
+        f4_df = pd.DataFrame(f4_games)[["Round", "Matchup", "Model Pick", "Opponent", "Pick Win Prob", "Model Spread", "Winner"]]
+        st.dataframe(f4_df, use_container_width=True, hide_index=True)
+        st.caption("**Model Pick** = team the model projects to win. **Pick Win Prob** = that team's win probability. **Model Spread** = projected margin in betting convention (negative = pick is favored).")
+        st.markdown(f"## 🏆 National Champion: **{champion[0]}** (#{champion[1]} seed)")
+
+    st.divider()
+
+    # ── Display: Monte Carlo results ───────────────────────────────────────────
+    st.subheader(f"Monte Carlo Probabilities ({n_sims:,} simulations)")
+
     champ_df = pd.DataFrame([
         {"Team": t, "Champion %": round(c / n_sims * 100, 1)}
         for t, c in sorted(champion_counts.items(), key=lambda x: -x[1]) if c > 0
@@ -526,7 +509,6 @@ if run_btn:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # Round advancement table
     all_teams = {t for r in REGIONS for t in region_seed_team[r].values() if t}
     adv_rows = []
     for team in sorted(all_teams):
