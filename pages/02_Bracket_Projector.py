@@ -68,8 +68,15 @@ _PROJECTED_TEAMS = {
 }
 
 # Load official bracket from DB if available, otherwise use projections
-_bracket_status = get_bracket_status(current_year)
-_db_bracket = load_bracket_from_db(current_year) if _bracket_status["stored"] else {}
+# Wrap in try/except in case tournament_bracket table doesn't exist yet on this deployment
+try:
+    from src.utils.db import init_db
+    init_db()  # ensure tournament_bracket table exists
+    _bracket_status = get_bracket_status(current_year)
+    _db_bracket = load_bracket_from_db(current_year) if _bracket_status["stored"] else {}
+except Exception:
+    _bracket_status = {"stored": False, "n_teams": 0, "fetched_at": None}
+    _db_bracket = {}
 DEFAULT_TEAMS = _db_bracket if _db_bracket else _PROJECTED_TEAMS
 _bracket_source = "official" if _db_bracket else "projected"
 
@@ -190,25 +197,74 @@ st.divider()
 # ── Simulation settings ────────────────────────────────────────────────────────
 col_sim1, col_sim2 = st.columns([1, 3])
 with col_sim1:
-    n_sims = st.selectbox("Monte Carlo simulations", [100, 500, 1000, 5000], index=2)
+    n_sims = st.selectbox("Monte Carlo simulations", [1000, 5000, 10000], index=0)
 with col_sim2:
-    st.caption("Higher simulations = more accurate probabilities but slower. 1000 is a good balance.")
+    st.caption("Win probabilities are pre-computed once, so simulations run instantly regardless of count.")
 
 run_btn = st.button("🔢 Project Bracket", type="primary", use_container_width=True)
 
 
 # ── Simulation helpers ─────────────────────────────────────────────────────────
-def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int) -> float:
-    """Return win prob for ta. ta must be the better seed (lower number = favored)."""
-    # Always pass seeds so project_game preserves team order (won't alphabetically swap)
+# Win probability cache: (ta, tb) -> float.  Populated once before any simulation.
+_wp_cache: dict = {}
+
+def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
+                  use_cache: bool = False) -> float:
+    """
+    Return win prob for ta (better seed = lower number).
+    use_cache=True: fast path for Monte Carlo — reads from pre-computed cache.
+    use_cache=False: calls model directly with correct round_num (used for display).
+    """
+    if use_cache:
+        # Cache is keyed (ta, tb) regardless of round — uses round 3 as proxy
+        key = (ta, tb)
+        if key in _wp_cache:
+            return _wp_cache[key]
+        rev = (tb, ta)
+        if rev in _wp_cache:
+            return 1.0 - _wp_cache[rev]
     proj = project_game(ta, tb, round_num=round_num, year=current_year, seed_a=sa, seed_b=sb)
-    if "error" in proj:
-        return 0.5
-    # With seeds passed and sa <= sb guaranteed by caller, team_a stays as ta
-    return proj.get("win_prob_a", 0.5)
+    return 0.5 if "error" in proj else proj.get("win_prob_a", 0.5)
 
 
-def simulate_region(seed_team: dict, deterministic: bool = True) -> list:
+def _precompute_win_probs(seed_teams_by_region: dict) -> None:
+    """
+    Pre-compute all pairwise win probabilities for every team in the bracket.
+    With 16 teams per region × 4 regions = 64 teams → at most ~2016 matchups.
+    Runs in ~10-15 seconds once; Monte Carlo then uses only dict lookups.
+    """
+    all_teams = []  # list of (team, seed)
+    for region, seed_team in seed_teams_by_region.items():
+        for seed, team in seed_team.items():
+            if team:
+                all_teams.append((team, seed))
+
+    total = len(all_teams) * (len(all_teams) - 1) // 2
+    done = 0
+    bar = st.progress(0.0, text=f"Pre-computing win probabilities (0/{total})...")
+
+    for i in range(len(all_teams)):
+        for j in range(i + 1, len(all_teams)):
+            ta, sa = all_teams[i]
+            tb, sb = all_teams[j]
+            key = (ta, tb)
+            if key not in _wp_cache:
+                # Use better seed as team_a; round_num=3 (S16) is a neutral mid-tournament proxy
+                if sa <= sb:
+                    _get_win_prob(ta, sa, tb, sb, round_num=3)
+                else:
+                    wp_b = _get_win_prob(tb, sb, ta, sa, round_num=3)
+                    _wp_cache[(ta, tb)] = 1.0 - wp_b
+                    _wp_cache[(tb, ta)] = wp_b
+            done += 1
+            if done % 50 == 0 or done == total:
+                bar.progress(done / total, text=f"Pre-computing win probabilities ({done}/{total})...")
+
+    bar.empty()
+
+
+def simulate_region(seed_team: dict, deterministic: bool = True,
+                    use_cache: bool = False) -> list:
     """
     Simulate a 16-team region using standard NCAA bracket structure.
     seed_team: {seed: team_name}
@@ -240,7 +296,8 @@ def simulate_region(seed_team: dict, deterministic: bool = True) -> list:
             else:
                 fav, fs, dog, ds = tb, sb, ta, sa
 
-            win_prob_fav = _get_win_prob(fav, fs, dog, ds, round_num)
+            win_prob_fav = _get_win_prob(fav, fs, dog, ds, round_num,
+                                          use_cache=use_cache)
 
             if deterministic:
                 winner = (fav, fs) if win_prob_fav >= 0.5 else (dog, ds)
@@ -289,7 +346,8 @@ def _project_game_row(ta, sa, tb, sb, round_num, label, round_name):
     }, wp_a
 
 
-def simulate_final_four(region_winners: dict, deterministic: bool = True):
+def simulate_final_four(region_winners: dict, deterministic: bool = True,
+                        use_cache: bool = False):
     """East vs West, South vs Midwest in F4."""
     matchups = [
         (region_winners["East"], region_winners["West"], "East vs West"),
@@ -303,6 +361,15 @@ def simulate_final_four(region_winners: dict, deterministic: bool = True):
             t_a, s_a, t_b, s_b = ta, sa, tb, sb
         else:
             t_a, s_a, t_b, s_b = tb, sb, ta, sa
+
+        if use_cache:
+            # Fast path: use cached win prob, skip display row generation
+            fav_t, fav_s = (t_a, s_a) if s_a <= s_b else (t_b, s_b)
+            dog_t, dog_s = (t_b, s_b) if s_a <= s_b else (t_a, s_a)
+            wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 5, use_cache=True)
+            winner = (fav_t, fav_s) if np.random.random() < wp_a else (dog_t, dog_s)
+            f4_winners.append(winner)
+            continue
 
         row, wp_a = _project_game_row(t_a, s_a, t_b, s_b, 5, label, "Final Four")
 
@@ -321,6 +388,13 @@ def simulate_final_four(region_winners: dict, deterministic: bool = True):
         t_a, s_a, t_b, s_b = ca, csa, cb, csb
     else:
         t_a, s_a, t_b, s_b = cb, csb, ca, csa
+
+    if use_cache:
+        fav_t, fav_s = (t_a, s_a) if s_a <= s_b else (t_b, s_b)
+        dog_t, dog_s = (t_b, s_b) if s_a <= s_b else (t_a, s_a)
+        wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 6, use_cache=True)
+        champ = (fav_t, fav_s) if np.random.random() < wp_a else (dog_t, dog_s)
+        return games, champ
 
     row, wp_a = _project_game_row(t_a, s_a, t_b, s_b, 6, "Championship", "Championship")
 
@@ -406,25 +480,32 @@ if run_btn:
     # ── Monte Carlo ────────────────────────────────────────────────────────────
     st.subheader(f"Monte Carlo Probabilities ({n_sims:,} simulations)")
 
-    champion_counts: dict = defaultdict(int)
-    round_adv: dict = defaultdict(lambda: defaultdict(int))  # team -> round -> count
+    # Step 1: pre-compute all pairwise win probs (once, ~10s) → sims become instant
+    _wp_cache.clear()  # clear any stale cache from previous run
+    with st.spinner("Computing win probabilities for all matchups..."):
+        _precompute_win_probs(region_seed_team)
 
-    progress = st.progress(0.0, text="Running simulations...")
+    # Step 2: run simulations using only cache lookups (no model calls)
+    champion_counts: dict = defaultdict(int)
+    round_adv: dict = defaultdict(lambda: defaultdict(int))
+
     for sim in range(n_sims):
         sim_winners = {}
         for region in REGIONS:
-            sim_rounds = simulate_region(region_seed_team[region], deterministic=False)
+            sim_rounds = simulate_region(
+                region_seed_team[region], deterministic=False, use_cache=True
+            )
             sim_winners[region] = sim_rounds[-1][0]
             for ri, survivors in enumerate(sim_rounds[1:], 2):
                 for team, seed in survivors:
                     round_adv[team][ri] += 1
 
-        _, sim_champ = simulate_final_four(sim_winners, deterministic=False)
+        _, sim_champ = simulate_final_four(
+            sim_winners, deterministic=False, use_cache=True
+        )
         champion_counts[sim_champ[0]] += 1
-        if (sim + 1) % max(1, n_sims // 20) == 0:
-            progress.progress((sim + 1) / n_sims, text=f"Simulation {sim+1}/{n_sims}...")
 
-    progress.empty()
+    st.caption(f"✅ {n_sims:,} simulations complete")
 
     # Champion probability chart
     champ_df = pd.DataFrame([
