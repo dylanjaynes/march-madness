@@ -2,13 +2,15 @@
 .env
 .env.*
 
-# Data (not committed — re-ingested at runtime)
-data/db/
+# Data (raw/processed not committed — re-ingested at runtime)
+# data/db/ ← committed so Streamlit Cloud has training data on cold start
+data/db/*.db-shm
+data/db/*.db-wal
 data/raw/
 data/processed/
 
-# Trained models (rebuilt at runtime)
-models/*.pkl
+# Trained models are committed so Streamlit Cloud doesn't rebuild on every boot
+# models/*.pkl
 
 # Python
 __pycache__/

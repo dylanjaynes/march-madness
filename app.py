@@ -23,16 +23,27 @@ def initialize_app():
     from pathlib import Path
     from src.utils.config import MODELS_DIR
     spread_path = MODELS_DIR / "spread_model.pkl"
-    total_path = MODELS_DIR / "total_model.pkl"
-    if not spread_path.exists() or not total_path.exists():
-        with st.spinner("First run: training models (~30 seconds)..."):
+    total_path  = MODELS_DIR / "total_model.pkl"
+
+    # Check both models AND game data — DB may be empty even if models exist
+    game_count = get_table_count("historical_results")
+    models_ok  = spread_path.exists() and total_path.exists()
+
+    needs_data    = game_count < 100
+    needs_models  = not models_ok
+
+    if needs_data or needs_models:
+        msg = "First run: ingesting data & training models (~3 min)..." if needs_data else "First run: training models (~30 seconds)..."
+        with st.spinner(msg):
             try:
-                from src.ingest.historical import build_historical_dataset
-                build_historical_dataset()
-                from src.model.train import run_full_training_pipeline
-                run_full_training_pipeline()
+                if needs_data:
+                    from src.ingest.historical import build_historical_dataset
+                    build_historical_dataset()
+                if needs_data or needs_models:
+                    from src.model.train import run_full_training_pipeline
+                    run_full_training_pipeline()
             except Exception as e:
-                st.error(f"Training error: {e}")
+                st.error(f"Initialization error: {e}")
     return True
 
 
