@@ -38,8 +38,8 @@ with st.form("matchup_form"):
         )
     with col4:
         market_spread = st.number_input(
-            "Market Spread (optional)", value=0.0, step=0.5,
-            help="Positive = Team A favored. Leave 0 to skip edge calc.",
+            "Team A spread (optional)", value=0.0, step=0.5,
+            help="Betting convention: -7 = Team A is 7pt favorite, +7 = 7pt underdog. Leave 0 to skip.",
         )
     with col5:
         market_total = st.number_input(
@@ -81,20 +81,25 @@ if submitted:
     seed_a = proj["seed_a"] if proj.get("seed_a") is not None else seed_a
     seed_b = proj["seed_b"] if proj.get("seed_b") is not None else seed_b
 
-    ps = proj["projected_spread"] * -1
-    pt = proj["projected_total"]
+    model_spread = proj["projected_spread"]   # model convention: positive = team_a wins
+    pt  = proj["projected_total"]
     wpa = proj["win_prob_a"]
     wpb = proj["win_prob_b"]
     score_a = proj["projected_score_a"]
     score_b = proj["projected_score_b"]
 
-    mkt = market_spread if market_spread != 0.0 else None
+    # Convert market input from betting convention (−7 = team_a favored)
+    # to model convention (+7 = team_a favored by 7) for all calculations
+    mkt_model = -market_spread if market_spread != 0.0 else None
     mkt_t = market_total if market_total != 0.0 else None
 
-    spread_edge = ps - mkt if mkt is not None else None
-    total_edge = pt - mkt_t if mkt_t is not None else None
-    cov_prob = coverage_probability(ps, mkt) if mkt is not None else None
+    spread_edge = model_spread - mkt_model if mkt_model is not None else None
+    total_edge  = pt - mkt_t if mkt_t is not None else None
+    cov_prob    = coverage_probability(model_spread, mkt_model) if mkt_model is not None else None
     tier_label, tier_emoji = bet_tier(spread_edge, cov_prob) if spread_edge is not None else ("—", "")
+
+    # Display values in betting convention (negate model spread so favorite = negative)
+    ps = -model_spread
 
     hk = half_kelly(cov_prob) if cov_prob is not None else None
     fk = kelly_fraction(cov_prob) if cov_prob is not None else None
@@ -156,10 +161,13 @@ if submitted:
 
     with odds_col:
         st.markdown("#### Betting Analysis")
-        if mkt is not None:
-            st.metric("Market Spread", f"{team_a} {'+' if mkt >= 0 else ''}{mkt:.1f}")
+        if mkt_model is not None:
+            # Display market spread in betting convention (same as user typed)
+            st.metric("Market Spread", f"{team_a} {market_spread:+.1f}")
+            # Positive edge = team_a covers; negative = team_b value
+            bet_on = team_a if spread_edge and spread_edge > 0 else team_b
             st.metric("Edge vs. Market", f"{spread_edge:+.1f} pts",
-                      delta=f"{tier_emoji} {tier_label}")
+                      delta=f"{tier_emoji} {tier_label} — lean {bet_on}")
             st.metric("Coverage Probability", f"{cov_prob:.1%}")
             st.markdown("---")
             st.metric("Half Kelly", f"{hk*100:.1f}%", f"${bankroll * hk:,.0f}")

@@ -175,8 +175,10 @@ def main():
             format_func=lambda r: {1: "R64", 2: "R32", 3: "S16", 4: "E8", 5: "F4", 6: "Champ"}[r],
         )
     with col_d:
-        market_spread = st.number_input("Market Spread (opt)", value=0.0, step=0.5,
-                                        help="Positive = Team A favored. 0 = skip edge calc.")
+        market_spread = st.number_input(
+            "Team A spread (opt)", value=0.0, step=0.5,
+            help="Use betting convention: -7 means Team A is a 7-point favorite, +7 means 7-point underdog. Leave 0 to skip edge calc."
+        )
 
     if st.button("Project", type="primary"):
         try:
@@ -185,28 +187,31 @@ def main():
             if "error" in proj:
                 st.error(proj["error"])
             else:
-                ps = proj["projected_spread"]
-                pt = proj["projected_total"]
+                ps  = proj["projected_spread"]   # model convention: positive = team_a wins
+                pt  = proj["projected_total"]
                 wpa = proj["win_prob_a"]
-                mkt = market_spread if market_spread != 0.0 else None
+                # Convert betting convention input (−7 = team_a favored) → model convention (+7)
+                mkt = -market_spread if market_spread != 0.0 else None
 
                 r1, r2, r3, r4, r5 = st.columns(5)
                 with r1:
-                    st.metric("Model Spread", f"{team_a} {ps:+.1f}")
+                    # Display in betting convention: negate so favorite shows as negative
+                    st.metric("Model Spread", f"{team_a} {-ps:+.1f}")
                 with r2:
                     st.metric("Model Total", f"{pt:.1f}")
                 with r3:
                     st.metric(f"{team_a} Win Prob", f"{wpa:.1%}")
                 with r4:
                     if mkt is not None:
-                        edge = ps - mkt
-                        st.metric("Edge", f"{edge:+.1f} pts")
+                        edge = ps - mkt   # both model convention; positive = team_a covers
+                        lean = team_a if edge > 0 else proj["team_b"]
+                        st.metric("Edge", f"{edge:+.1f} pts", delta=f"lean {lean}")
                     else:
                         st.metric("Edge", "—")
                 with r5:
                     if mkt is not None:
                         cov = coverage_probability(ps, mkt)
-                        tier, emoji = bet_tier(ps - mkt, cov)
+                        tier, emoji = bet_tier(edge, cov)
                         st.metric("Rating", f"{emoji} {tier}")
                     else:
                         st.metric("Rating", "—")
