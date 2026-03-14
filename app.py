@@ -186,9 +186,14 @@ def main():
             if "error" in proj:
                 st.error(proj["error"])
             else:
-                ps  = proj["projected_spread"]   # model convention: positive = team_a wins
+                # project_game may canonically reorder teams; normalise to caller's team_a perspective
+                if proj["team_a"] == team_a:
+                    ps  = proj["projected_spread"]
+                    wpa = proj["win_prob_a"]
+                else:
+                    ps  = -proj["projected_spread"]   # flip to original team_a's view
+                    wpa = proj["win_prob_b"]          # = 1 - win_prob_a
                 pt  = proj["projected_total"]
-                wpa = proj["win_prob_a"]
                 # Convert betting convention input (−7 = team_a favored) → model convention (+7)
                 mkt = -market_spread if market_spread != 0.0 else None
 

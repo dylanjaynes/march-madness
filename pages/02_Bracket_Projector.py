@@ -40,28 +40,28 @@ team_list = get_team_list(current_year)
 # ── Default 2025-26 bracket ────────────────────────────────────────────────────
 DEFAULT_TEAMS = {
     "East": {
-        1: "Duke", 16: "Baylor", 8: "Alabama", 9: "St. John's",
-        5: "Michigan St.", 12: "New Mexico", 4: "Mississippi St.", 13: "BYU",
+        1: "Duke", 16: "Baylor", 8: "Alabama", 9: "St. John's (NY)",
+        5: "Michigan State", 12: "New Mexico", 4: "Mississippi State", 13: "BYU",
         6: "Wisconsin", 11: "Montana", 3: "Arizona", 14: "Akron",
         7: "Troy", 10: "Ole Miss", 2: "Maryland", 15: "Grand Canyon",
     },
     "West": {
-        1: "Auburn", 16: "Alabama St.", 8: "Louisville", 9: "Creighton",
+        1: "Auburn", 16: "Alabama State", 8: "Louisville", 9: "Creighton",
         5: "Michigan", 12: "UC San Diego", 4: "Texas A&M", 13: "Yale",
-        6: "St. Mary's", 11: "VCU", 3: "Iowa St.", 14: "Lipscomb",
-        7: "Marquette", 10: "New Mexico St.", 2: "Michigan St.", 15: "Bryant",
+        6: "Saint Mary's", 11: "VCU", 3: "Iowa State", 14: "Lipscomb",
+        7: "Marquette", 10: "New Mexico State", 2: "Michigan State", 15: "Bryant",
     },
     "South": {
-        1: "Florida", 16: "Norfolk St.", 8: "UConn", 9: "Oklahoma",
-        5: "Memphis", 12: "Colorado St.", 4: "Maryland", 13: "Grand Canyon",
-        6: "Missouri", 11: "Drake", 3: "Texas Tech", 14: "UNCW",
+        1: "Florida", 16: "Norfolk State", 8: "Connecticut", 9: "Oklahoma",
+        5: "Memphis", 12: "Colorado State", 4: "Maryland", 13: "Grand Canyon",
+        6: "Missouri", 11: "Drake", 3: "Texas Tech", 14: "UNC Wilmington",
         7: "Kansas", 10: "Arkansas", 2: "Tennessee", 15: "Wofford",
     },
     "Midwest": {
         1: "Houston", 16: "SIU Edwardsville", 8: "Gonzaga", 9: "Georgia",
-        5: "Clemson", 12: "McNeese", 4: "Purdue", 13: "High Point",
+        5: "Clemson", 12: "McNeese State", 4: "Purdue", 13: "High Point",
         6: "Illinois", 11: "TCU", 3: "Kentucky", 14: "Troy",
-        7: "UCLA", 10: "Utah St.", 2: "Connecticut", 15: "Tennessee St.",
+        7: "UCLA", 10: "Utah State", 2: "Connecticut", 15: "Tennessee St.",
     },
 }
 
@@ -140,10 +140,12 @@ run_btn = st.button("🔢 Project Bracket", type="primary", use_container_width=
 
 # ── Simulation helpers ─────────────────────────────────────────────────────────
 def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int) -> float:
-    """Return win prob for team_a vs team_b. team_a should be better seed."""
-    proj = project_game(ta, tb, round_num=round_num, year=current_year)
+    """Return win prob for ta. ta must be the better seed (lower number = favored)."""
+    # Always pass seeds so project_game preserves team order (won't alphabetically swap)
+    proj = project_game(ta, tb, round_num=round_num, year=current_year, seed_a=sa, seed_b=sb)
     if "error" in proj:
         return 0.5
+    # With seeds passed and sa <= sb guaranteed by caller, team_a stays as ta
     return proj.get("win_prob_a", 0.5)
 
 
@@ -199,7 +201,7 @@ def _project_game_row(ta, sa, tb, sb, round_num, label, round_name):
     team_a = lower seed (better seed by number). Model convention: positive spread = team_a favored.
     We display from MODEL's perspective: show who the model actually likes.
     """
-    proj = project_game(ta, tb, round_num=round_num, year=current_year)
+    proj = project_game(ta, tb, round_num=round_num, year=current_year, seed_a=sa, seed_b=sb)
     if "error" in proj:
         wp_a, sp = 0.5, 0.0
     else:
