@@ -8,7 +8,9 @@ import plotly.express as px
 from collections import defaultdict
 
 from src.utils.config import TOURNAMENT_YEARS
-from src.model.predict import project_game, season_label, data_as_of
+from src.model.predict import project_game, season_label, data_as_of, spread_to_win_prob
+from src.model.train import load_model
+from src.features.matchup import build_matchup_features, MATCHUP_FEATURES
 from src.ingest.bracket import fetch_and_store_bracket, load_bracket_from_db, get_bracket_status
 from src.features.team_ratings import load_ratings_cache, clear_ratings_cache
 
@@ -232,7 +234,9 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
     """
     Pre-compute all pairwise win probabilities for every team in the bracket.
     With 16 teams per region × 4 regions = 64 teams → at most ~2016 matchups.
-    Runs in ~10-15 seconds once; Monte Carlo then uses only dict lookups.
+
+    Vectorized: builds all feature vectors first, then does a single batch
+    model.predict() call instead of loading models 2016 times.
     """
     all_teams = []  # list of (team, seed)
     for region, seed_team in seed_teams_by_region.items():
@@ -240,34 +244,61 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             if team:
                 all_teams.append((team, seed))
 
-    # Batch-load all team ratings in one DB query to eliminate per-team round-trips
+    # Batch-load all team ratings in one DB query
     all_team_names = [t for t, s in all_teams]
     clear_ratings_cache()
     load_ratings_cache(all_team_names, current_year)
 
-    total = len(all_teams) * (len(all_teams) - 1) // 2
-    done = 0
-    bar = st.progress(0.0, text=f"Pre-computing win probabilities (0/{total})...")
-
+    # Build the list of ordered pairs (better seed = team_a)
+    pairs = []  # [(ta, sa, tb, sb), ...]
     for i in range(len(all_teams)):
         for j in range(i + 1, len(all_teams)):
             ta, sa = all_teams[i]
             tb, sb = all_teams[j]
-            key = (ta, tb)
-            if key not in _wp_cache:
-                # Use better seed as team_a; round_num=3 (S16) is a neutral mid-tournament proxy
-                if sa <= sb:
-                    wp_a = _get_win_prob(ta, sa, tb, sb, round_num=3)
-                    _wp_cache[(ta, tb)] = wp_a
-                    _wp_cache[(tb, ta)] = 1.0 - wp_a
-                else:
-                    wp_b = _get_win_prob(tb, sb, ta, sa, round_num=3)
-                    _wp_cache[(ta, tb)] = 1.0 - wp_b
-                    _wp_cache[(tb, ta)] = wp_b
-            done += 1
-            if done % 50 == 0 or done == total:
-                bar.progress(done / total, text=f"Pre-computing win probabilities ({done}/{total})...")
+            if sa <= sb:
+                pairs.append((ta, sa, tb, sb))
+            else:
+                pairs.append((tb, sb, ta, sa))
 
+    total = len(pairs)
+    bar = st.progress(0.0, text="Pre-computing win probabilities — building features...")
+
+    # Build all feature vectors (fast: uses ratings cache, no model loading)
+    feat_rows = []
+    valid_pairs = []
+    for idx, (ta, sa, tb, sb) in enumerate(pairs):
+        feats = build_matchup_features(ta, tb, current_year, round_num=3,
+                                       seed_a=sa, seed_b=sb)
+        if not feats.isna().all():
+            feat_rows.append(feats[MATCHUP_FEATURES].values)
+            valid_pairs.append((ta, sa, tb, sb))
+        else:
+            # No ratings — default to 50/50
+            _wp_cache[(ta, tb)] = 0.5
+            _wp_cache[(tb, ta)] = 0.5
+        if (idx + 1) % 100 == 0 or (idx + 1) == total:
+            bar.progress((idx + 1) / total / 2,  # first half = feature building
+                         text=f"Building features ({idx + 1}/{total})...")
+
+    if feat_rows:
+        bar.progress(0.5, text="Running model predictions...")
+        # Single batch predict for all matchups — load models just once
+        try:
+            spread_model = load_model("spread_model")
+            X = np.array(feat_rows)
+            spreads = spread_model.predict(X)
+            for (ta, sa, tb, sb), spread in zip(valid_pairs, spreads):
+                wp_a = spread_to_win_prob(float(spread))
+                _wp_cache[(ta, tb)] = wp_a
+                _wp_cache[(tb, ta)] = 1.0 - wp_a
+        except Exception as e:
+            # Fallback: compute individually if batch fails
+            for ta, sa, tb, sb in valid_pairs:
+                wp_a = _get_win_prob(ta, sa, tb, sb, round_num=3)
+                _wp_cache[(ta, tb)] = wp_a
+                _wp_cache[(tb, ta)] = 1.0 - wp_a
+
+    bar.progress(1.0, text=f"Done — {total} matchups pre-computed.")
     bar.empty()
 
 
