@@ -39,6 +39,9 @@ def initialize_app():
                 if needs_data:
                     from src.ingest.historical import build_historical_dataset
                     build_historical_dataset()
+                    # Join any stored historical lines into training data
+                    from src.ingest.join_lines import join_lines_to_training
+                    join_lines_to_training()
                 if needs_data or needs_models:
                     from src.model.train import run_full_training_pipeline
                     run_full_training_pipeline()
@@ -138,16 +141,12 @@ def main():
 
         m1, m2, m3, m4 = st.columns(4)
         with m1:
-            ats = total_row["ATS (All)"]
-            parts = ats.split("-")
-            if len(parts) >= 2:
-                w, l = int(parts[0]), int(parts[1])
-                pct = w / (w + l) * 100 if (w + l) > 0 else 50
-                st.metric("Overall ATS", ats, f"{pct:.1f}%")
-            else:
-                st.metric("Overall ATS", ats)
+            ats = total_row["True ATS (All)"]
+            st.metric("True ATS (w/ Lines)", ats,
+                      help="Actual margin vs. real Vegas closing spread. 2019 + 2021–2025 only.")
         with m2:
-            st.metric("ATS @ Edge≥3", total_row["ATS (Edge≥3)"], total_row["ATS ROI (Edge≥3)"])
+            st.metric("True ATS @ Edge≥3", total_row["True ATS (Edge≥3)"],
+                      total_row["ATS ROI (Edge≥3)"])
         with m3:
             st.metric("Spread RMSE", f"{total_row['Spread RMSE']} pts")
         with m4:

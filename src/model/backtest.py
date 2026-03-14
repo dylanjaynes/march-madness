@@ -143,8 +143,8 @@ def run_backtest(years: list = None) -> dict:
         total_rmse = np.sqrt(mean_squared_error(actual_totals, pred_total))
         market_spread_rmse = np.sqrt(mean_squared_error(actual_spreads, market_spreads))
 
-        # ATS analysis (model vs actual, no market lines)
-        # We use model spread as our "pick" — positive model spread means team_a favored
+        # True ATS analysis using real market lines
+        # mkt_spread == 0 means no real line (filled); skip from ATS buckets
         ats_all, ats_2, ats_3, ats_5 = [], [], [], []
         ou_all, ou_2, ou_3 = [], [], []
 
@@ -156,31 +156,38 @@ def run_backtest(years: list = None) -> dict:
             actual_margin = actual_spreads[j]
             actual_total = actual_totals[j]
 
-            # ATS: compare model projection to actual (if no market lines, use 0)
-            # Positive spread_edge = model thinks team_a covers
-            spread_edge = model_spread - mkt_spread
+            # spread_edge meaningful only when real market line exists
+            spread_edge = model_spread - mkt_spread if mkt_spread != 0 else float("nan")
             total_edge = model_total - mkt_total
 
-            # Use actual result vs model as ATS proxy
-            # If model says team_a by X and actual > 0 = team_a wins = model was right directionally
-            ats_result = "WIN" if (model_spread > 0 and actual_margin > 0) or \
-                                  (model_spread < 0 and actual_margin < 0) else "LOSS"
-            ats_all.append(ats_result)
-
-            if abs(spread_edge) >= 2:
-                ats_2.append(ats_result)
-            if abs(spread_edge) >= 3:
-                ats_3.append(ats_result)
-            if abs(spread_edge) >= 5:
-                ats_5.append(ats_result)
+            # True ATS: team_a covers if actual_margin > market_spread
+            # (model convention: positive = team_a favored)
+            if mkt_spread != 0:  # real market line
+                if actual_margin > mkt_spread:
+                    ats_result = "WIN"
+                elif actual_margin == mkt_spread:
+                    ats_result = "PUSH"
+                else:
+                    ats_result = "LOSS"
+                ats_all.append(ats_result)
+                abs_edge = abs(spread_edge) if not np.isnan(spread_edge) else 0
+                if abs_edge >= 2:
+                    ats_2.append(ats_result)
+                if abs_edge >= 3:
+                    ats_3.append(ats_result)
+                if abs_edge >= 5:
+                    ats_5.append(ats_result)
+            else:
+                ats_result = "NO_LINE"
 
             ou_result = "WIN" if (model_total > mkt_total and actual_total > mkt_total) or \
                                  (model_total < mkt_total and actual_total < mkt_total) else "LOSS"
-            ou_all.append(ou_result)
-            if abs(total_edge) >= 2:
-                ou_2.append(ou_result)
-            if abs(total_edge) >= 3:
-                ou_3.append(ou_result)
+            if mkt_total > 0:
+                ou_all.append(ou_result)
+                if abs(total_edge) >= 2:
+                    ou_2.append(ou_result)
+                if abs(total_edge) >= 3:
+                    ou_3.append(ou_result)
 
             all_predictions.append({
                 "year": test_year,
@@ -227,6 +234,7 @@ def run_backtest(years: list = None) -> dict:
             "ou_roi_edge_3": calculate_roi([r for r in ou_3 if r != "PUSH"]),
             "by_round": by_round,
             "n_games": len(X_test),
+            "n_games_with_lines": len(ats_all),
             "train_years": train_years,
         }
 
@@ -244,14 +252,24 @@ def _compute_aggregate_metrics(df: pd.DataFrame) -> dict:
 
     spread_rmse = np.sqrt(mean_squared_error(df["actual_margin"], df["model_spread"]))
     total_rmse = np.sqrt(mean_squared_error(df["actual_total"], df["model_total"]))
-    market_rmse = np.sqrt(mean_squared_error(df["actual_margin"], df["market_spread"]))
 
-    ats_all = df["ats_result"].tolist()
-    ats_3 = df[df["spread_edge"].abs() >= 3]["ats_result"].tolist()
-    ats_5 = df[df["spread_edge"].abs() >= 5]["ats_result"].tolist()
+    # Market RMSE only over games with real lines
+    real_lines = df[df["market_spread"] != 0]
+    market_rmse = np.sqrt(mean_squared_error(real_lines["actual_margin"], real_lines["market_spread"])) if not real_lines.empty else 0.0
 
-    ou_all = df["ou_result"].tolist()
-    ou_3 = df[df["total_edge"].abs() >= 3]["ou_result"].tolist()
+    # True ATS: only games with real market lines (market_spread != 0)
+    ats_df = df[df["ats_result"].isin(["WIN", "LOSS", "PUSH"])].copy()
+    ats_3_df = ats_df[ats_df["spread_edge"].abs() >= 3] if not ats_df.empty else ats_df
+    ats_5_df = ats_df[ats_df["spread_edge"].abs() >= 5] if not ats_df.empty else ats_df
+
+    ats_all = ats_df["ats_result"].tolist()
+    ats_3 = ats_3_df["ats_result"].tolist()
+    ats_5 = ats_5_df["ats_result"].tolist()
+
+    ou_all_df = df[df["ou_result"].isin(["WIN", "LOSS"])]
+    ou_3_df = ou_all_df[ou_all_df["total_edge"].abs() >= 3] if not ou_all_df.empty else ou_all_df
+    ou_all = ou_all_df["ou_result"].tolist()
+    ou_3 = ou_3_df["ou_result"].tolist()
 
     return {
         "spread_rmse": spread_rmse,
@@ -270,43 +288,55 @@ def _compute_aggregate_metrics(df: pd.DataFrame) -> dict:
 
 
 def generate_backtest_report(results: dict) -> pd.DataFrame:
-    """Format backtest results into a display-ready DataFrame."""
+    """
+    Format backtest results into a display-ready DataFrame.
+    ATS columns reflect TRUE ATS vs real market lines (games without lines excluded).
+    """
     rows = []
     per_year = results.get("per_year", {})
 
     for year, metrics in per_year.items():
         ats_all = metrics.get("ats_record_all", (0, 0, 0))
         ats_3 = metrics.get("ats_record_edge_3", (0, 0, 0))
+        ats_5 = metrics.get("ats_record_edge_5", (0, 0, 0))
         ou_all = metrics.get("ou_record_all", (0, 0, 0))
+        n_lines = metrics.get("n_games_with_lines", ats_all[0] + ats_all[1] + ats_all[2])
 
+        def _pct(w, l):
+            return f"{w/(w+l)*100:.1f}%" if (w + l) > 0 else "—"
+
+        w, l, p = ats_all
+        w3, l3, p3 = ats_3
         rows.append({
             "Year": str(year),
-            "Games": metrics.get("n_games", 0),
+            "All Games": metrics.get("n_games", 0),
+            "w/ Lines": n_lines,
             "Spread RMSE": round(metrics.get("spread_rmse", 0), 2),
-            "Total RMSE": round(metrics.get("total_rmse", 0), 2),
             "Market RMSE": round(metrics.get("vs_market_spread_rmse", 0), 2),
-            "ATS (All)": f"{ats_all[0]}-{ats_all[1]}-{ats_all[2]}",
-            "ATS (Edge≥3)": f"{ats_3[0]}-{ats_3[1]}-{ats_3[2]}",
-            "ATS ROI (Edge≥3)": f"{metrics.get('ats_roi_edge_3', 0):.1f}%",
+            "True ATS (All)": f"{w}-{l}-{p} ({_pct(w,l)})" if n_lines > 0 else "no lines",
+            "True ATS (Edge≥3)": f"{w3}-{l3}-{p3} ({_pct(w3,l3)})" if (w3+l3) > 0 else "—",
+            "ATS ROI (Edge≥3)": f"{metrics.get('ats_roi_edge_3', 0):.1f}%" if (w3+l3) > 0 else "—",
             "O/U (All)": f"{ou_all[0]}-{ou_all[1]}-{ou_all[2]}",
-            "Train Years": str(metrics.get("train_years", [])),
         })
 
     # Add aggregate row
     ats_all_agg = results.get("ats_record_all", (0, 0, 0))
     ats_3_agg = results.get("ats_record_edge_3", (0, 0, 0))
     ou_all_agg = results.get("ou_record_all", (0, 0, 0))
+    w, l, p = ats_all_agg
+    w3, l3, p3 = ats_3_agg
+    pct_all = f"{w/(w+l)*100:.1f}%" if (w + l) > 0 else "—"
+    pct_3 = f"{w3/(w3+l3)*100:.1f}%" if (w3 + l3) > 0 else "—"
     rows.append({
         "Year": "TOTAL",
-        "Games": results.get("n_games_total", 0),
+        "All Games": results.get("n_games_total", 0),
+        "w/ Lines": w + l + p,
         "Spread RMSE": round(results.get("spread_rmse", 0), 2),
-        "Total RMSE": round(results.get("total_rmse", 0), 2),
         "Market RMSE": round(results.get("vs_market_spread_rmse", 0), 2),
-        "ATS (All)": f"{ats_all_agg[0]}-{ats_all_agg[1]}-{ats_all_agg[2]}",
-        "ATS (Edge≥3)": f"{ats_3_agg[0]}-{ats_3_agg[1]}-{ats_3_agg[2]}",
+        "True ATS (All)": f"{w}-{l}-{p} ({pct_all})",
+        "True ATS (Edge≥3)": f"{w3}-{l3}-{p3} ({pct_3})",
         "ATS ROI (Edge≥3)": f"{results.get('ats_roi_edge_3', 0):.1f}%",
         "O/U (All)": f"{ou_all_agg[0]}-{ou_all_agg[1]}-{ou_all_agg[2]}",
-        "Train Years": "Walk-Forward",
     })
 
     return pd.DataFrame(rows)

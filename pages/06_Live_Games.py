@@ -266,13 +266,13 @@ if not best.empty:
                          if b["pick_mkt_display"] is not None else "—")
             st.markdown(
                 f"""<div style='background:{color};border-radius:10px;padding:14px;margin-bottom:8px'>
-                <div style='font-size:1.1rem;font-weight:bold'>{b['tier_emoji']} {b['matchup']}</div>
+                <div style='font-size:1.1rem;font-weight:bold; color: rgb(255, 255, 255);'>{b['tier_emoji']} {b['matchup']}</div>
                 <div style='color:#ccc;font-size:0.85rem'>{b['date_label']} · {b['time']}</div>
                 <div style='color:#aaa;font-size:0.8rem;margin-top:4px'>Model picks: <b style='color:#fff'>{b['pick']}</b></div>
                 <hr style='border-color:#ffffff22;margin:8px 0'>
                 <div style='display:flex;justify-content:space-between'>
                   <div><div style='color:#aaa;font-size:0.75rem'>MODEL</div>
-                       <div style='font-size:1rem;font-weight:bold'>{model_str}</div></div>
+                       <div style='font-size:1rem;font-weight:bold; color: rgb(255, 255, 255);'>{model_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>MARKET</div>
                        <div style='font-size:1rem; color: rgb(255, 255, 255);'>{mkt_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>EDGE</div>
