@@ -121,6 +121,15 @@ CREATE TABLE IF NOT EXISTS mm_training_data (
     PRIMARY KEY (year, game_date, team_a, team_b)
 );
 
+CREATE TABLE IF NOT EXISTS tournament_bracket (
+    year INTEGER,
+    region TEXT,
+    seed INTEGER,
+    team TEXT,
+    fetched_at TIMESTAMP,
+    PRIMARY KEY (year, region, seed)
+);
+
 CREATE TABLE IF NOT EXISTS predictions (
     prediction_id TEXT PRIMARY KEY,
     created_at TIMESTAMP,

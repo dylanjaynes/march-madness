@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from src.utils.config import TOURNAMENT_YEARS
 from src.model.predict import project_game, season_label, data_as_of
+from src.ingest.bracket import fetch_and_store_bracket, load_bracket_from_db, get_bracket_status
 
 st.set_page_config(page_title="Bracket Projector", page_icon="🔢", layout="wide")
 st.title("🔢 Bracket Projector")
@@ -37,8 +38,9 @@ def get_team_list(year: int):
 
 team_list = get_team_list(current_year)
 
-# ── Default 2025-26 bracket ────────────────────────────────────────────────────
-DEFAULT_TEAMS = {
+# ── Bracket source: DB first, then hardcoded projections as fallback ───────────
+# Hardcoded pre-Selection-Sunday projections (used only when DB has no data)
+_PROJECTED_TEAMS = {
     "East": {
         1: "Duke", 16: "Baylor", 8: "Alabama", 9: "St. John's (NY)",
         5: "Michigan State", 12: "New Mexico", 4: "Mississippi State", 13: "BYU",
@@ -64,6 +66,40 @@ DEFAULT_TEAMS = {
         7: "UCLA", 10: "Utah State", 2: "Connecticut", 15: "Tennessee St.",
     },
 }
+
+# Load official bracket from DB if available, otherwise use projections
+_bracket_status = get_bracket_status(current_year)
+_db_bracket = load_bracket_from_db(current_year) if _bracket_status["stored"] else {}
+DEFAULT_TEAMS = _db_bracket if _db_bracket else _PROJECTED_TEAMS
+_bracket_source = "official" if _db_bracket else "projected"
+
+# ── Bracket fetch UI ──────────────────────────────────────────────────────────
+_col_status, _col_btn = st.columns([3, 1])
+with _col_status:
+    if _bracket_source == "official":
+        st.success(
+            f"✅ **Official bracket loaded** · {_bracket_status['n_teams']} teams · "
+            f"fetched {_bracket_status['fetched_at'][:16] if _bracket_status['fetched_at'] else ''}",
+            icon=None,
+        )
+    else:
+        st.info("📋 **Using projected bracket** — click to load the official bracket once released on Selection Sunday.", icon=None)
+
+with _col_btn:
+    if st.button("🔄 Load Official Bracket", use_container_width=True,
+                 help="Fetches the official bracket from Sports Reference. Available after Selection Sunday."):
+        with st.spinner("Fetching bracket from Sports Reference..."):
+            try:
+                bracket = fetch_and_store_bracket(current_year)
+                if bracket:
+                    n = sum(len(v) for v in bracket.values())
+                    st.success(f"Loaded {n} teams across {len(bracket)} regions!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning("Bracket not yet available on Sports Reference. Try again after Selection Sunday.")
+            except Exception as e:
+                st.error(f"Fetch failed: {e}")
 
 
 def _resolve_default(name: str) -> str:
