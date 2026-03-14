@@ -10,6 +10,7 @@ from collections import defaultdict
 from src.utils.config import TOURNAMENT_YEARS
 from src.model.predict import project_game, season_label, data_as_of
 from src.ingest.bracket import fetch_and_store_bracket, load_bracket_from_db, get_bracket_status
+from src.features.team_ratings import load_ratings_cache, clear_ratings_cache
 
 st.set_page_config(page_title="Bracket Projector", page_icon="🔢", layout="wide")
 st.title("🔢 Bracket Projector")
@@ -239,6 +240,11 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             if team:
                 all_teams.append((team, seed))
 
+    # Batch-load all team ratings in one DB query to eliminate per-team round-trips
+    all_team_names = [t for t, s in all_teams]
+    clear_ratings_cache()
+    load_ratings_cache(all_team_names, current_year)
+
     total = len(all_teams) * (len(all_teams) - 1) // 2
     done = 0
     bar = st.progress(0.0, text=f"Pre-computing win probabilities (0/{total})...")
@@ -251,7 +257,9 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             if key not in _wp_cache:
                 # Use better seed as team_a; round_num=3 (S16) is a neutral mid-tournament proxy
                 if sa <= sb:
-                    _get_win_prob(ta, sa, tb, sb, round_num=3)
+                    wp_a = _get_win_prob(ta, sa, tb, sb, round_num=3)
+                    _wp_cache[(ta, tb)] = wp_a
+                    _wp_cache[(tb, ta)] = 1.0 - wp_a
                 else:
                     wp_b = _get_win_prob(tb, sb, ta, sa, round_num=3)
                     _wp_cache[(ta, tb)] = 1.0 - wp_b

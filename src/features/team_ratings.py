@@ -1,6 +1,31 @@
 import pandas as pd
 from src.utils.db import query_df
 
+# Module-level ratings cache — pre-populate with load_ratings_cache() to avoid
+# per-team DB queries during bulk operations like Monte Carlo precomputation.
+_ratings_cache: dict = {}  # key: (team, year) -> dict
+
+
+def load_ratings_cache(teams: list, year: int) -> None:
+    """
+    Batch-load ratings for all given teams in a single DB query and store
+    in module-level cache. Call this before bulk matchup computation to
+    eliminate per-team DB round-trips.
+    """
+    if not teams:
+        return
+    placeholders = ",".join("?" * len(teams))
+    df = query_df(
+        f"SELECT * FROM torvik_ratings WHERE year = ? AND team IN ({placeholders})",
+        params=[year] + list(teams),
+    )
+    for _, row in df.iterrows():
+        _ratings_cache[(row["team"], year)] = row.to_dict()
+
+
+def clear_ratings_cache() -> None:
+    _ratings_cache.clear()
+
 
 def build_team_feature_vector(team: str, year: int, as_of_date: str = None) -> dict:
     """
@@ -10,7 +35,16 @@ def build_team_feature_vector(team: str, year: int, as_of_date: str = None) -> d
     so historical training uses only stats known at Selection Sunday — no leakage.
     Falls back to torvik_ratings (current-season live ratings) when as_of_date
     is None or the snapshot row is missing.
+
+    Checks module-level _ratings_cache first (populated by load_ratings_cache)
+    to avoid per-team DB round-trips during bulk operations.
     """
+    # Fast path: check cache (only when no as_of_date override)
+    if not as_of_date:
+        cache_key = (team, year)
+        if cache_key in _ratings_cache:
+            return _ratings_cache[cache_key]
+
     if as_of_date:
         sql = (
             "SELECT * FROM torvik_ratings_snapshot "
