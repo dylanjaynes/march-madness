@@ -4,12 +4,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timezone, timedelta
+import pytz
 
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
 from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly,
     bet_tier, season_label, data_as_of,
 )
+
 
 st.set_page_config(page_title="Live Games", page_icon="📡", layout="wide")
 
@@ -31,6 +33,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 current_year = TOURNAMENT_YEARS[-1]
+
+EST = pytz.timezone("US/Eastern")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -76,7 +80,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
         # Parse tip-off time
         try:
             dt = datetime.fromisoformat(commence.replace("Z", "+00:00"))
-            local_dt = dt.astimezone()
+            local_dt = dt.astimezone(EST)
             date_key   = local_dt.strftime("%Y-%m-%d")
             date_label = local_dt.strftime("%A, %b %d")
             time_label = local_dt.strftime("%I:%M %p").lstrip("0")
