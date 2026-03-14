@@ -66,10 +66,33 @@ DEFAULT_TEAMS = {
 }
 
 
+def _resolve_default(name: str) -> str:
+    """
+    Find the best match for a default team name in team_list.
+    Tries exact match first, then checks if any team_list entry is an alias
+    for the same canonical name (handles DB naming variations like
+    'Michigan St.' vs 'Michigan State').
+    """
+    if not name:
+        return ""
+    if name in team_list:
+        return name
+    # Try to resolve via team_map aliases
+    try:
+        from src.utils.team_map import normalize_team_name
+        canonical = normalize_team_name(name)
+        # canonical matches exact — find any team_list entry that normalizes to same canonical
+        for t in team_list:
+            if normalize_team_name(t) == canonical:
+                return t
+    except Exception:
+        pass
+    return ""  # not found — leave blank
+
+
 def _team_selectbox(region: str, seed: int, defaults: dict) -> str:
     """Render a searchable selectbox for a team slot. Returns team name string."""
-    default_name = defaults.get(seed, "")
-    # Find index of default in list (selectbox needs index)
+    default_name = _resolve_default(defaults.get(seed, ""))
     try:
         idx = team_list.index(default_name) + 1  # +1 because index 0 = ""
     except ValueError:
