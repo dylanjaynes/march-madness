@@ -1,0 +1,79 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Paths
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BASE_DIR / "data"
+RAW_DIR = DATA_DIR / "raw"
+PROCESSED_DIR = DATA_DIR / "processed"
+DB_PATH = DATA_DIR / "db" / "mm_model.db"
+MODELS_DIR = BASE_DIR / "models"
+
+# Ensure dirs exist
+for d in [RAW_DIR, PROCESSED_DIR, DB_PATH.parent, MODELS_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+# API Keys
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+
+# Tournament years (2020 cancelled)
+TOURNAMENT_YEARS = [2019, 2021, 2022, 2023, 2024, 2025, 2026]
+
+# Selection Sunday dates (day before first games)
+SELECTION_SUNDAY = {
+    2019: "0317",
+    2021: "0314",
+    2022: "0313",
+    2023: "0312",
+    2024: "0317",
+    2025: "0316",
+    2026: "0315",
+}
+
+# Model parameters
+SPREAD_MODEL_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "random_state": 42,
+}
+
+TOTAL_MODEL_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "random_state": 42,
+}
+
+# Adjustments
+NEUTRAL_SITE_ADJUSTMENT = 0
+TOURNAMENT_PACE_HAIRCUT = -2.5
+SPREAD_STD_DEV = 10.5  # For win probability conversion
+
+# Conference power conferences
+POWER_CONFERENCES = {"ACC", "Big Ten", "SEC", "Big 12", "Big East", "Pac-12"}
+
+# Edge thresholds for display
+EDGE_THRESHOLD_LOW = 2.0
+EDGE_THRESHOLD_MED = 3.0
+EDGE_THRESHOLD_HIGH = 5.0
+
+# Odds API
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+ODDS_SPORT = "basketball_ncaab"
+
+# BartTorvik
+TORVIK_BASE = "https://barttorvik.com"
+
+# Round name mapping
+ROUND_NAMES = {
+    1: "R64", 2: "R32", 3: "S16", 4: "E8", 5: "F4", 6: "Champ"
+}
+ROUND_NUMBERS = {v: k for k, v in ROUND_NAMES.items()}

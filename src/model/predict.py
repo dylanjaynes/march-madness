@@ -1,0 +1,209 @@
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+
+from src.utils.config import SPREAD_STD_DEV, TOURNAMENT_YEARS, ROUND_NAMES
+
+COVERAGE_STD = 12.0  # residual std from walk-forward backtest RMSE
+
+
+def coverage_probability(model_spread: float, market_spread: float,
+                          residual_std: float = COVERAGE_STD) -> float:
+    """Probability the bet covers. Models actual_margin ~ N(model_spread, residual_std)."""
+    if model_spread >= market_spread:
+        return float(1 - norm.cdf(market_spread, loc=model_spread, scale=residual_std))
+    else:
+        return float(norm.cdf(market_spread, loc=model_spread, scale=residual_std))
+
+
+def kelly_fraction(win_prob: float, juice: int = -110) -> float:
+    """Full Kelly fraction, clamped to [0, 0.30]."""
+    if win_prob <= 0.5:
+        return 0.0
+    b = 100 / abs(juice)
+    f = (b * win_prob - (1 - win_prob)) / b
+    return max(0.0, min(f, 0.30))
+
+
+def half_kelly(win_prob: float, juice: int = -110) -> float:
+    return kelly_fraction(win_prob, juice) / 2.0
+
+
+def bet_tier(edge: float, cov_prob: float) -> tuple:
+    """Return (label, emoji) tier for a bet."""
+    e = abs(edge)
+    if e >= 7 and cov_prob >= 0.58:
+        return "Strong", "🔥"
+    elif e >= 5 and cov_prob >= 0.56:
+        return "Value", "✅"
+    elif e >= 3 and cov_prob >= 0.54:
+        return "Lean", "📊"
+    return "Pass", "⚪"
+
+
+def season_label(year: int) -> str:
+    return f"{year - 1}–{str(year)[2:]}"
+
+
+def data_as_of(year: int) -> str:
+    from src.utils.config import SELECTION_SUNDAY
+    import datetime
+    months = {3: "Mar", 4: "Apr"}
+    if year in SELECTION_SUNDAY:
+        mmdd = SELECTION_SUNDAY[year]
+        mm, dd = int(mmdd[:2]), int(mmdd[2:])
+        return f"Selection Sunday — {months.get(mm,'Mar')} {dd}, {year}"
+    return f"Live — {datetime.date.today().strftime('%b %d, %Y')}"
+from src.features.matchup import MATCHUP_FEATURES, build_matchup_features
+from src.features.adjustments import apply_tournament_pace_adjustment
+from src.model.train import load_model
+
+
+def spread_to_win_prob(spread: float, std_dev: float = SPREAD_STD_DEV) -> float:
+    """
+    Convert point spread to win probability using normal distribution.
+    Positive spread = team_a is favored by spread pts.
+    """
+    return float(norm.cdf(0, loc=-spread, scale=std_dev))
+
+
+def project_game(team_a: str, team_b: str,
+                 round_num: int, year: int = None,
+                 seed_a: int = None, seed_b: int = None,
+                 game_date: str = None) -> dict:
+    """
+    Project spread and total for a single tournament game.
+    Results are always returned from the perspective of the better seed (lower number).
+    Input order doesn't matter — teams are reordered to match training convention.
+    """
+    if year is None:
+        year = TOURNAMENT_YEARS[-1]
+
+    # Enforce a canonical team ordering so the same matchup always produces
+    # the same features regardless of input order.
+    # When seeds aren't supplied, look them up from the DB.
+    # Priority: (1) better seed (lower number) is team_a,
+    #           (2) alphabetical tiebreaker when seeds are equal or unknown.
+    if seed_a is None or seed_b is None:
+        from src.utils.db import query_df
+        rows = query_df(
+            "SELECT team, seed FROM torvik_ratings WHERE year=? AND team IN (?,?) AND seed IS NOT NULL",
+            params=[year, team_a, team_b],
+        )
+        seed_map = dict(zip(rows["team"], rows["seed"])) if not rows.empty else {}
+        sa = int(seed_map.get(team_a) or 8)
+        sb = int(seed_map.get(team_b) or 8)
+    else:
+        sa, sb = seed_a, seed_b
+
+    if sb < sa or (sb == sa and team_b < team_a):
+        team_a, team_b = team_b, team_a
+        seed_a, seed_b = sb, sa
+    else:
+        seed_a, seed_b = sa, sb
+
+    try:
+        spread_model = load_model("spread_model")
+        total_model = load_model("total_model")
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    feats = build_matchup_features(
+        team_a, team_b, year, round_num,
+        seed_a=seed_a, seed_b=seed_b,
+        game_date=game_date,
+    )
+
+    if feats.isna().all():
+        return {
+            "error": f"Could not build features for {team_a} vs {team_b}",
+            "team_a": team_a,
+            "team_b": team_b,
+        }
+
+    X = feats[MATCHUP_FEATURES].values.reshape(1, -1)
+
+    projected_spread = float(spread_model.predict(X)[0])
+    projected_total_raw = float(total_model.predict(X)[0])
+    projected_total = apply_tournament_pace_adjustment(projected_total_raw)
+
+    # Back-calculate individual scores
+    projected_score_a = (projected_total + projected_spread) / 2
+    projected_score_b = (projected_total - projected_spread) / 2
+
+    win_prob_a = spread_to_win_prob(projected_spread)
+
+    return {
+        "team_a": team_a,
+        "team_b": team_b,
+        "seed_a": seed_a,
+        "seed_b": seed_b,
+        "round_num": round_num,
+        "round_name": ROUND_NAMES.get(round_num, f"R{round_num}"),
+        "projected_spread": projected_spread,
+        "projected_total": projected_total,
+        "projected_score_a": projected_score_a,
+        "projected_score_b": projected_score_b,
+        "win_prob_a": win_prob_a,
+        "win_prob_b": 1 - win_prob_a,
+    }
+
+
+def project_all_live_games(year: int = None) -> pd.DataFrame:
+    """
+    Project all live tournament games by joining odds + model predictions.
+    Returns DataFrame with model lines, market lines, and edges.
+    """
+    from src.ingest.odds import get_latest_odds
+    from src.utils.db import query_df
+
+    if year is None:
+        year = TOURNAMENT_YEARS[-1]
+
+    odds_df = get_latest_odds()
+
+    rows = []
+    if odds_df.empty:
+        # Fall back to 2025 tournament bracket if no live odds
+        bracket_df = query_df(
+            "SELECT * FROM historical_results WHERE year = ? ORDER BY round_number, game_date",
+            params=[year]
+        )
+        for _, game in bracket_df.iterrows():
+            t1, t2 = game["team1"], game["team2"]
+            rn = int(game["round_number"] or 1)
+            proj = project_game(t1, t2, rn, year,
+                                seed_a=game.get("seed1"),
+                                seed_b=game.get("seed2"),
+                                game_date=str(game.get("game_date") or ""))
+            if "error" not in proj:
+                proj["market_spread"] = None
+                proj["market_total"] = None
+                proj["spread_edge"] = None
+                proj["total_edge"] = None
+                proj["game_date"] = game.get("game_date")
+                rows.append(proj)
+    else:
+        for _, odds in odds_df.iterrows():
+            home = odds["home_team"]
+            away = odds["away_team"]
+            mkt_spread = odds.get("spread_home")
+            mkt_total = odds.get("total_line")
+
+            # Determine which is team_a (better seed) — default to home for live games
+            proj = project_game(home, away, round_num=1, year=year)
+            if "error" not in proj:
+                proj["market_spread"] = mkt_spread
+                proj["market_total"] = mkt_total
+                proj["spread_edge"] = (
+                    proj["projected_spread"] - mkt_spread
+                    if mkt_spread is not None else None
+                )
+                proj["total_edge"] = (
+                    proj["projected_total"] - mkt_total
+                    if mkt_total is not None else None
+                )
+                proj["game_date"] = odds.get("commence_time", "")
+                rows.append(proj)
+
+    return pd.DataFrame(rows)

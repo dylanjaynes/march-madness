@@ -1,0 +1,213 @@
+import streamlit as st
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+st.set_page_config(
+    page_title="March Madness Model",
+    page_icon="🏀",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+from src.utils.db import init_db, get_table_count, query_df
+from src.utils.config import TOURNAMENT_YEARS
+from src.model.predict import season_label, data_as_of
+from datetime import datetime
+
+
+@st.cache_resource
+def initialize_app():
+    init_db()
+    from pathlib import Path
+    from src.utils.config import MODELS_DIR
+    spread_path = MODELS_DIR / "spread_model.pkl"
+    total_path = MODELS_DIR / "total_model.pkl"
+    if not spread_path.exists() or not total_path.exists():
+        with st.spinner("First run: training models (~30 seconds)..."):
+            try:
+                from src.ingest.historical import build_historical_dataset
+                build_historical_dataset()
+                from src.model.train import run_full_training_pipeline
+                run_full_training_pipeline()
+            except Exception as e:
+                st.error(f"Training error: {e}")
+    return True
+
+
+def main():
+    initialize_app()
+
+    current_year = TOURNAMENT_YEARS[-1]
+    season = season_label(current_year)
+    data_note = data_as_of(current_year)
+
+    # Sidebar
+    with st.sidebar:
+        st.markdown("## 🏀 March Madness")
+        st.caption(f"**{season} Season**")
+        st.caption(f"Data: {data_note}")
+        st.divider()
+        st.page_link("app.py", label="Home", icon="🏠")
+        st.page_link("pages/06_Live_Games.py", label="Live Games", icon="📡")
+        st.page_link("pages/01_Bet_Board.py", label="Bet Board", icon="🎯")
+        st.page_link("pages/02_Bracket_Projector.py", label="Bracket Projector", icon="🔢")
+        st.page_link("pages/03_Matchup_Builder.py", label="Matchup Builder", icon="⚔️")
+        st.page_link("pages/04_Backtest_Results.py", label="Backtest Results", icon="📈")
+        st.page_link("pages/05_Teams.py", label="Teams", icon="📋")
+        st.divider()
+        st.caption(f"Refreshed: {datetime.now().strftime('%b %d %H:%M')}")
+
+        st.divider()
+        st.markdown("**Data**")
+        if st.button("🔄 Refresh Ratings", use_container_width=True,
+                     help="Pull latest BartTorvik ratings and retrain models"):
+            with st.spinner("Fetching ratings from BartTorvik..."):
+                try:
+                    from src.ingest.torvik import store_team_ratings
+                    n = len(store_team_ratings(current_year))
+                    st.success(f"Updated {n} teams")
+                except Exception as e:
+                    st.error(f"Ratings fetch failed: {e}")
+            with st.spinner("Retraining models..."):
+                try:
+                    from src.model.train import run_full_training_pipeline
+                    run_full_training_pipeline()
+                    st.success("Models retrained")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Training failed: {e}")
+
+    # Header
+    col_title, col_badge = st.columns([4, 1])
+    with col_title:
+        st.title("March Madness Projection Model")
+        st.caption("XGBoost spread & total model trained on BartTorvik efficiency ratings")
+    with col_badge:
+        st.metric("Season", season)
+        st.caption(data_note)
+
+    st.divider()
+
+    # KPI row
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        n_games = get_table_count("mm_training_data")
+        st.metric("Training Games", n_games)
+    with col2:
+        n_ratings = get_table_count("torvik_ratings")
+        st.metric("Team-Seasons", n_ratings)
+    with col3:
+        st.metric("Tournament Years", len(TOURNAMENT_YEARS))
+    with col4:
+        n_lines = get_table_count("historical_lines")
+        st.metric("Historical Lines", n_lines)
+    with col5:
+        n_odds = get_table_count("odds_history")
+        st.metric("Live Odds Snapshots", n_odds)
+
+    st.divider()
+
+    # Model performance summary
+    st.subheader("Model Performance (Walk-Forward Backtest)")
+    try:
+        from src.model.backtest import run_backtest, generate_backtest_report
+
+        @st.cache_data(ttl=3600)
+        def load_backtest():
+            return run_backtest()
+
+        with st.spinner("Loading backtest..."):
+            results = load_backtest()
+
+        report = generate_backtest_report(results)
+        total_row = report[report["Year"] == "TOTAL"].iloc[0]
+
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            ats = total_row["ATS (All)"]
+            parts = ats.split("-")
+            if len(parts) >= 2:
+                w, l = int(parts[0]), int(parts[1])
+                pct = w / (w + l) * 100 if (w + l) > 0 else 50
+                st.metric("Overall ATS", ats, f"{pct:.1f}%")
+            else:
+                st.metric("Overall ATS", ats)
+        with m2:
+            st.metric("ATS @ Edge≥3", total_row["ATS (Edge≥3)"], total_row["ATS ROI (Edge≥3)"])
+        with m3:
+            st.metric("Spread RMSE", f"{total_row['Spread RMSE']} pts")
+        with m4:
+            st.metric("vs Market RMSE", f"{total_row['Market RMSE']} pts")
+
+        per_year = report[report["Year"] != "TOTAL"]
+        st.dataframe(per_year, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.warning(f"Backtest unavailable: {e}")
+
+    st.divider()
+
+    # Quick matchup tool
+    st.subheader("Quick Matchup")
+    st.caption("Enter any two teams for a one-click projection.")
+
+    col_a, col_b, col_c, col_d = st.columns([2, 2, 1, 1])
+    with col_a:
+        team_a = st.text_input("Team A (favorite / higher seed)", value="Duke")
+    with col_b:
+        team_b = st.text_input("Team B (underdog / lower seed)", value="Houston")
+    with col_c:
+        round_num = st.selectbox(
+            "Round", [1, 2, 3, 4, 5, 6],
+            format_func=lambda r: {1: "R64", 2: "R32", 3: "S16", 4: "E8", 5: "F4", 6: "Champ"}[r],
+        )
+    with col_d:
+        market_spread = st.number_input("Market Spread (opt)", value=0.0, step=0.5,
+                                        help="Positive = Team A favored. 0 = skip edge calc.")
+
+    if st.button("Project", type="primary"):
+        try:
+            from src.model.predict import project_game, coverage_probability, bet_tier
+            proj = project_game(team_a, team_b, round_num, year=current_year)
+            if "error" in proj:
+                st.error(proj["error"])
+            else:
+                ps = proj["projected_spread"]
+                pt = proj["projected_total"]
+                wpa = proj["win_prob_a"]
+                mkt = market_spread if market_spread != 0.0 else None
+
+                r1, r2, r3, r4, r5 = st.columns(5)
+                with r1:
+                    st.metric("Model Spread", f"{team_a} {ps:+.1f}")
+                with r2:
+                    st.metric("Model Total", f"{pt:.1f}")
+                with r3:
+                    st.metric(f"{team_a} Win Prob", f"{wpa:.1%}")
+                with r4:
+                    if mkt is not None:
+                        edge = ps - mkt
+                        st.metric("Edge", f"{edge:+.1f} pts")
+                    else:
+                        st.metric("Edge", "—")
+                with r5:
+                    if mkt is not None:
+                        cov = coverage_probability(ps, mkt)
+                        tier, emoji = bet_tier(ps - mkt, cov)
+                        st.metric("Rating", f"{emoji} {tier}")
+                    else:
+                        st.metric("Rating", "—")
+
+                st.caption(
+                    f"Projected score: **{proj['team_a']} {proj['projected_score_a']:.0f}** – "
+                    f"**{proj['team_b']} {proj['projected_score_b']:.0f}**  |  "
+                    f"Data: {data_note}"
+                )
+        except Exception as e:
+            st.error(f"Projection error: {e}")
+
+
+if __name__ == "__main__":
+    main()
