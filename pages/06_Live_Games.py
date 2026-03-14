@@ -13,6 +13,23 @@ from src.model.predict import (
 
 st.set_page_config(page_title="Live Games", page_icon="📡", layout="wide")
 
+# Custom CSS: fix tab text colors and general readability
+st.markdown("""
+<style>
+.stTabs [data-baseweb="tab-list"] { gap: 8px; }
+.stTabs [data-baseweb="tab"] {
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 6px 16px;
+    color: #555 !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #e74c3c !important;
+    border-bottom: 2px solid #e74c3c !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 current_year = TOURNAMENT_YEARS[-1]
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -41,7 +58,7 @@ def fetch_live_odds():
 
 # ── Project all games ─────────────────────────────────────────────────────────
 @st.cache_data(ttl=120)
-def build_projections(round_ctx: int, yr: int):
+def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
     odds_df = fetch_live_odds()
     if odds_df.empty:
         return pd.DataFrame(), []
@@ -60,10 +77,10 @@ def build_projections(round_ctx: int, yr: int):
         try:
             dt = datetime.fromisoformat(commence.replace("Z", "+00:00"))
             local_dt = dt.astimezone()
-            date_key = local_dt.strftime("%Y-%m-%d")
+            date_key   = local_dt.strftime("%Y-%m-%d")
             date_label = local_dt.strftime("%A, %b %d")
             time_label = local_dt.strftime("%I:%M %p").lstrip("0")
-            days_out = (dt.date() - now_utc.date()).days
+            days_out   = (dt.date() - now_utc.date()).days
         except Exception:
             date_key = commence[:10]
             date_label = commence[:10]
@@ -77,33 +94,36 @@ def build_projections(round_ctx: int, yr: int):
 
         ta = proj["team_a"]
         tb = proj["team_b"]
-        model_spread = proj["projected_spread"]
+        model_spread = proj["projected_spread"]   # model convention: + = team_a wins
         model_total  = proj["projected_total"]
         wpa = proj["win_prob_a"]
         wpb = proj["win_prob_b"]
         score_a = proj["projected_score_a"]
         score_b = proj["projected_score_b"]
 
-        # Market spread → model convention (positive = team_a favored)
+        # Market spread → model convention (+ = team_a favored)
         if mkt_spread_home is not None:
             msh = float(mkt_spread_home)
             mkt_spread_ta = -msh if (ta.lower() == home.lower()) else msh
-            spread_edge = model_spread - mkt_spread_ta
+            spread_edge = model_spread - mkt_spread_ta   # + = team_a has edge, − = team_b has edge
         else:
             mkt_spread_ta = None
             spread_edge = None
 
         total_edge = (model_total - float(mkt_total)) if mkt_total is not None else None
 
+        # ── Determine model's pick & flip display perspective ─────────────────
+        # coverage_probability() already returns P(model's preferred side covers)
+        # regardless of which team that is
         if spread_edge is not None:
             cov_prob = coverage_probability(model_spread, mkt_spread_ta)
             hk = half_kelly(cov_prob)
             fk = kelly_fraction(cov_prob)
             tier_label, tier_emoji = bet_tier(spread_edge, cov_prob)
-            if sizing == "Full Kelly":
-                bet_size = round(bankroll * fk)
-            elif sizing == "Half Kelly":
-                bet_size = round(bankroll * hk)
+            if sizing_ == "Full Kelly":
+                bet_size = round(bankroll_ * fk)
+            elif sizing_ == "Half Kelly":
+                bet_size = round(bankroll_ * hk)
             else:
                 bet_size = 100
         else:
@@ -111,24 +131,50 @@ def build_projections(round_ctx: int, yr: int):
             tier_label, tier_emoji = "Pass", "⚪"
             bet_size = 0
 
+        # Always display from the model's pick perspective
+        # model_spread > 0 → team_a is pick; model_spread < 0 → team_b is pick
+        if model_spread >= 0:
+            pick, opp = ta, tb
+            # Betting convention: favorite shown as negative
+            pick_model_display = -model_spread          # e.g. -5.7 if team_a favored by 5.7
+            pick_mkt_display   = -mkt_spread_ta if mkt_spread_ta is not None else None
+            pick_win_prob, opp_win_prob = wpa, wpb
+            pick_score, opp_score = score_a, score_b
+        else:
+            pick, opp = tb, ta
+            # model_spread is negative (team_b wins); in betting convention team_b favored = negative
+            pick_model_display = model_spread           # already negative e.g. -12.6
+            pick_mkt_display   = mkt_spread_ta if mkt_spread_ta is not None else None
+            pick_win_prob, opp_win_prob = wpb, wpa
+            pick_score, opp_score = score_b, score_a
+
+        abs_edge = abs(spread_edge) if spread_edge is not None else None
+
         tier_order = {"Strong": 0, "Value": 1, "Lean": 2, "Pass": 3}.get(tier_label, 4)
 
         rows.append({
-            # display
-            "date_key":   date_key,
-            "date_label": date_label,
-            "days_out":   days_out,
-            "time":       time_label,
-            "team_a":     ta,
-            "team_b":     tb,
-            "matchup":    f"{ta} vs {tb}",
-            "score_line": f"{score_a:.0f} – {score_b:.0f}",
-            "win_prob_a": wpa,
-            "win_prob_b": wpb,
-            # spread
+            "date_key":    date_key,
+            "date_label":  date_label,
+            "days_out":    days_out,
+            "time":        time_label,
+            # canonical teams (for reference)
+            "team_a": ta, "team_b": tb,
+            # pick-perspective display fields
+            "pick":        pick,
+            "opp":         opp,
+            "matchup":     f"{ta} vs {tb}",          # always home-like vs away-like
+            "pick_matchup": f"{pick} vs {opp}",
+            "pick_model_display": pick_model_display,
+            "pick_mkt_display":   pick_mkt_display,
+            "pick_win_prob":  pick_win_prob,
+            "opp_win_prob":   opp_win_prob,
+            "pick_score":  pick_score,
+            "opp_score":   opp_score,
+            # model
             "model_spread":  model_spread,
             "mkt_spread_ta": mkt_spread_ta,
             "spread_edge":   spread_edge,
+            "abs_edge":      abs_edge,
             "cov_prob":      cov_prob,
             "hk_pct":        hk,
             "bet_size":      bet_size,
@@ -159,7 +205,7 @@ with hcol2:
         st.rerun()
 
 with st.spinner("Loading games..."):
-    df, errors = build_projections(round_context, current_year)
+    df, errors = build_projections(round_context, current_year, bankroll, sizing)
 
 if df.empty:
     st.warning("No upcoming NCAAB games found.")
@@ -174,7 +220,7 @@ view = df.copy()
 if hide_pass:
     view = view[view["tier_order"] < 3]
 if min_edge > 0:
-    view = view[view["spread_edge"].abs() >= min_edge]
+    view = view[view["abs_edge"].notna() & (view["abs_edge"] >= min_edge)]
 
 # ── Summary KPIs ──────────────────────────────────────────────────────────────
 strong = (df["tier_order"] == 0).sum()
@@ -192,30 +238,30 @@ k5.metric("📊 Lean",   int(lean))
 k6.metric("Allocated", f"${total_alloc:,.0f}")
 
 # ── Best bets banner ──────────────────────────────────────────────────────────
-best = df[df["tier_order"] <= 1].sort_values("spread_edge", key=lambda s: s.abs(), ascending=False)
+best = df[df["tier_order"] <= 1].sort_values("abs_edge", ascending=False)
 if not best.empty:
     st.divider()
     st.subheader("🏆 Best Bets")
     cols = st.columns(min(len(best), 3))
     for idx, (_, b) in enumerate(best.iterrows()):
         with cols[idx % len(cols)]:
-            edge = b["spread_edge"]
-            direction = b["team_a"] if edge > 0 else b["team_b"]
-            spread_str = f"{b['team_a']} {-b['model_spread']:+.1f}"
-            mkt_str    = f"{b['team_a']} {-b['mkt_spread_ta']:+.1f}" if b["mkt_spread_ta"] is not None else "—"
             color = "#1a472a" if b["tier_label"] == "Strong" else "#1e3a5f"
+            model_str = f"{b['pick']} {b['pick_model_display']:+.1f}"
+            mkt_str   = (f"{b['pick']} {b['pick_mkt_display']:+.1f}"
+                         if b["pick_mkt_display"] is not None else "—")
             st.markdown(
                 f"""<div style='background:{color};border-radius:10px;padding:14px;margin-bottom:8px'>
                 <div style='font-size:1.1rem;font-weight:bold'>{b['tier_emoji']} {b['matchup']}</div>
                 <div style='color:#ccc;font-size:0.85rem'>{b['date_label']} · {b['time']}</div>
+                <div style='color:#aaa;font-size:0.8rem;margin-top:4px'>Model picks: <b style='color:#fff'>{b['pick']}</b></div>
                 <hr style='border-color:#ffffff22;margin:8px 0'>
                 <div style='display:flex;justify-content:space-between'>
                   <div><div style='color:#aaa;font-size:0.75rem'>MODEL</div>
-                       <div style='font-size:1rem;font-weight:bold'>{spread_str}</div></div>
+                       <div style='font-size:1rem;font-weight:bold'>{model_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>MARKET</div>
                        <div style='font-size:1rem'>{mkt_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>EDGE</div>
-                       <div style='font-size:1rem;font-weight:bold;color:#2ecc71'>{edge:+.1f} pts</div></div>
+                       <div style='font-size:1rem;font-weight:bold;color:#2ecc71'>+{b['abs_edge']:.1f} pts</div></div>
                 </div>
                 <div style='display:flex;justify-content:space-between;margin-top:8px'>
                   <div><div style='color:#aaa;font-size:0.75rem'>COV PROB</div>
@@ -240,8 +286,9 @@ if not dates:
 date_tabs = st.tabs([view.loc[view["date_key"] == d, "date_label"].iloc[0] for d in dates])
 
 for date, tab in zip(dates, date_tabs):
-    day_df = view[view["date_key"] == date].sort_values(["tier_order", "spread_edge"],
-        key=lambda s: s if s.name != "spread_edge" else s.abs(), ascending=[True, False])
+    day_df = view[view["date_key"] == date].sort_values(
+        ["tier_order", "abs_edge"], ascending=[True, False]
+    )
 
     with tab:
         if day_df.empty:
@@ -253,15 +300,21 @@ for date, tab in zip(dates, date_tabs):
                 "Strong": ("#1a472a", "#2ecc71"),
                 "Value":  ("#1e3a5f", "#3498db"),
                 "Lean":   ("#3d2b1f", "#f39c12"),
-                "Pass":   ("#1e1e1e", "#7f8c8d"),
+                "Pass":   ("#2a2a2a", "#7f8c8d"),
             }
-            bg, accent = tier_colors.get(row["tier_label"], ("#1e1e1e", "#aaa"))
+            bg, accent = tier_colors.get(row["tier_label"], ("#2a2a2a", "#aaa"))
 
-            edge_str = f"{row['spread_edge']:+.1f}" if row["spread_edge"] is not None else "—"
-            mkt_str  = f"{row['team_a']} {-row['mkt_spread_ta']:+.1f}" if row["mkt_spread_ta"] is not None else "—"
-            ou_str   = (f"O/U: model {row['model_total']} vs {row['mkt_total']} "
-                        f"({'Over' if row['total_edge'] and row['total_edge'] > 0 else 'Under'} "
-                        f"{abs(row['total_edge']):.1f})" if row["total_edge"] is not None else "")
+            # Pick-perspective spread strings
+            model_str = f"{row['pick']} {row['pick_model_display']:+.1f}"
+            mkt_str   = (f"{row['pick']} {row['pick_mkt_display']:+.1f}"
+                         if row["pick_mkt_display"] is not None else "—")
+            edge_str  = f"+{row['abs_edge']:.1f}" if row["abs_edge"] is not None else "—"
+
+            ou_str = ""
+            if row["total_edge"] is not None:
+                direction = "Over" if row["total_edge"] > 0 else "Under"
+                ou_str = (f"O/U: model {row['model_total']} vs {row['mkt_total']} "
+                          f"({direction} {abs(row['total_edge']):.1f})")
 
             c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
 
@@ -274,11 +327,12 @@ for date, tab in zip(dates, date_tabs):
                     unsafe_allow_html=True,
                 )
             with c2:
+                score_line = f"{row['pick_score']:.0f} – {row['opp_score']:.0f}"
                 st.markdown(
                     f"<div style='text-align:center;padding:4px'>"
                     f"<div style='color:#aaa;font-size:0.75rem'>PROJECTED</div>"
-                    f"<div style='font-size:0.95rem'>{row['team_a']} {-row['model_spread']:+.1f}</div>"
-                    f"<div style='color:#aaa;font-size:0.75rem'>{row['score_line']}</div>"
+                    f"<div style='font-size:0.95rem;font-weight:600'>{model_str}</div>"
+                    f"<div style='color:#aaa;font-size:0.75rem'>{score_line}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -292,11 +346,11 @@ for date, tab in zip(dates, date_tabs):
                     unsafe_allow_html=True,
                 )
             with c4:
-                win_pct = f"{row['win_prob_a']:.0%} / {row['win_prob_b']:.0%}"
+                win_pct = f"{row['pick_win_prob']:.0%} / {row['opp_win_prob']:.0%}"
                 cov_str = f"{row['cov_prob']:.1%}" if row["cov_prob"] else "—"
                 st.markdown(
                     f"<div style='text-align:center;padding:4px'>"
-                    f"<div style='color:#aaa;font-size:0.75rem'>WIN PROB</div>"
+                    f"<div style='color:#aaa;font-size:0.75rem'>WIN PROB ({row['pick']})</div>"
                     f"<div style='font-size:0.9rem'>{win_pct}</div>"
                     f"<div style='color:#aaa;font-size:0.75rem'>cov {cov_str}</div>"
                     f"</div>",
@@ -310,6 +364,7 @@ for date, tab in zip(dates, date_tabs):
                     f"<div style='text-align:center;padding:6px 8px;background:{bg};"
                     f"border-left:3px solid {accent};border-radius:6px'>"
                     f"<div style='font-weight:bold;color:{accent}'>{tier_badge}</div>"
+                    f"<div style='font-size:0.85rem;color:#ddd'>Bet {row['pick']}</div>"
                     f"<div style='font-size:0.9rem'>{bet_str}</div>"
                     f"<div style='color:#aaa;font-size:0.75rem'>{hk_str} Kelly</div>"
                     f"</div>",
