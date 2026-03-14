@@ -34,8 +34,10 @@ per_year = results.get("per_year", {})
 # ── True ATS calculation (vs real market lines) ───────────────────────────────
 def compute_true_ats(df: pd.DataFrame, min_edge: float = 0.0):
     """
-    True ATS: filter to real market lines (market_spread != 0),
-    then check if actual_margin > market_spread (team_a covers).
+    True ATS graded from MODEL'S BET perspective.
+    - spread_edge >= 0: model likes team_a → WIN if actual_margin > market_spread
+    - spread_edge < 0:  model likes team_b → WIN if actual_margin < market_spread
+    Only games with real market lines (market_spread != 0) are included.
     """
     if df.empty:
         return pd.DataFrame()
@@ -44,11 +46,27 @@ def compute_true_ats(df: pd.DataFrame, min_edge: float = 0.0):
         filtered = filtered[filtered["spread_edge"].abs() >= min_edge]
     if filtered.empty:
         return filtered
-    filtered["true_ats"] = filtered.apply(
-        lambda r: "WIN" if r["actual_margin"] > r["market_spread"]
-        else ("PUSH" if r["actual_margin"] == r["market_spread"] else "LOSS"),
-        axis=1,
-    )
+
+    def _grade(r):
+        am = r["actual_margin"]
+        ms = r["market_spread"]
+        edge = r["spread_edge"]
+        if edge < 0:
+            # bet team_b: team_b covers if actual_margin < market_spread
+            if am < ms:
+                return "WIN"
+            elif am == ms:
+                return "PUSH"
+            return "LOSS"
+        else:
+            # bet team_a: team_a covers if actual_margin > market_spread
+            if am > ms:
+                return "WIN"
+            elif am == ms:
+                return "PUSH"
+            return "LOSS"
+
+    filtered["true_ats"] = filtered.apply(_grade, axis=1)
     return filtered
 
 
@@ -296,12 +314,15 @@ if not preds_df.empty:
         ]
         log_df = preds_df[[c for c in display_cols if c in preds_df.columns]].copy()
         log_df["round_name"] = log_df["round_number"].map(ROUND_NAMES)
-        log_df["true_ats"] = log_df.apply(
-            lambda r: "WIN" if r["actual_margin"] > r["market_spread"]
-            else ("PUSH" if r["actual_margin"] == r["market_spread"] else "LOSS")
-            if r["market_spread"] != 0 else "NO LINE",
-            axis=1,
-        )
+        def _log_grade(r):
+            if r["market_spread"] == 0:
+                return "NO LINE"
+            am, ms, edge = r["actual_margin"], r["market_spread"], r["spread_edge"]
+            if edge < 0:
+                return "WIN" if am < ms else ("PUSH" if am == ms else "LOSS")
+            return "WIN" if am > ms else ("PUSH" if am == ms else "LOSS")
+
+        log_df["true_ats"] = log_df.apply(_log_grade, axis=1)
         log_df = log_df.sort_values(["year", "round_number"])
         for col in ["model_spread", "model_total", "market_spread", "market_total",
                     "actual_margin", "actual_total", "spread_edge", "total_edge"]:

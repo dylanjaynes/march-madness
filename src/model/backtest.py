@@ -160,15 +160,26 @@ def run_backtest(years: list = None) -> dict:
             spread_edge = model_spread - mkt_spread if mkt_spread != 0 else float("nan")
             total_edge = model_total - mkt_total
 
-            # True ATS: team_a covers if actual_margin > market_spread
-            # (model convention: positive = team_a favored)
+            # True ATS graded from MODEL'S BET perspective:
+            #   spread_edge > 0 → bet team_a → WIN if actual_margin > market_spread
+            #   spread_edge < 0 → bet team_b → WIN if actual_margin < market_spread
             if mkt_spread != 0:  # real market line
-                if actual_margin > mkt_spread:
-                    ats_result = "WIN"
-                elif actual_margin == mkt_spread:
-                    ats_result = "PUSH"
+                if not np.isnan(spread_edge) and spread_edge < 0:
+                    # Model likes team_b; team_b covers if actual_margin < market_spread
+                    if actual_margin < mkt_spread:
+                        ats_result = "WIN"
+                    elif actual_margin == mkt_spread:
+                        ats_result = "PUSH"
+                    else:
+                        ats_result = "LOSS"
                 else:
-                    ats_result = "LOSS"
+                    # Model likes team_a (or no edge); team_a covers if actual_margin > market_spread
+                    if actual_margin > mkt_spread:
+                        ats_result = "WIN"
+                    elif actual_margin == mkt_spread:
+                        ats_result = "PUSH"
+                    else:
+                        ats_result = "LOSS"
                 ats_all.append(ats_result)
                 abs_edge = abs(spread_edge) if not np.isnan(spread_edge) else 0
                 if abs_edge >= 2:
