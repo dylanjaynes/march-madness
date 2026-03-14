@@ -131,19 +131,34 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
             tier_label, tier_emoji = "Pass", "⚪"
             bet_size = 0
 
-        # Always display from the model's pick perspective
-        # model_spread > 0 → team_a is pick; model_spread < 0 → team_b is pick
-        if model_spread >= 0:
+        # ── Determine VALUE pick ─────────────────────────────────────────────
+        # The bet is on whichever team the MARKET undervalues, not the model's
+        # projected winner. With market data: edge direction decides; without
+        # market data: fall back to model's projected winner.
+        #
+        # spread_edge = model_spread − mkt_spread_ta (model convention)
+        #   > 0 → model more bullish on team_a than market  → bet team_a
+        #   < 0 → model less bullish on team_a than market  → bet team_b (underdog value)
+        if mkt_spread_ta is not None:
+            team_a_has_edge = (spread_edge >= 0)
+        else:
+            team_a_has_edge = (model_spread >= 0)
+
+        if team_a_has_edge:
             pick, opp = ta, tb
-            # Betting convention: favorite shown as negative
-            pick_model_display = -model_spread          # e.g. -5.7 if team_a favored by 5.7
+            # Betting convention for team_a: negate model_spread
+            #   model_spread > 0 (team_a wins) → -model_spread < 0 = favorite display
+            #   model_spread < 0 (team_a loses) → -model_spread > 0 = underdog display
+            pick_model_display = -model_spread
             pick_mkt_display   = -mkt_spread_ta if mkt_spread_ta is not None else None
             pick_win_prob, opp_win_prob = wpa, wpb
             pick_score, opp_score = score_a, score_b
         else:
             pick, opp = tb, ta
-            # model_spread is negative (team_b wins); in betting convention team_b favored = negative
-            pick_model_display = model_spread           # already negative e.g. -12.6
+            # Betting convention for team_b: use model_spread as-is
+            #   model_spread > 0 (team_a wins, team_b is underdog) → +X = underdog display
+            #   model_spread < 0 (team_b wins, team_b is favorite) → -X = favorite display
+            pick_model_display = model_spread
             pick_mkt_display   = mkt_spread_ta if mkt_spread_ta is not None else None
             pick_win_prob, opp_win_prob = wpb, wpa
             pick_score, opp_score = score_b, score_a
@@ -259,7 +274,7 @@ if not best.empty:
                   <div><div style='color:#aaa;font-size:0.75rem'>MODEL</div>
                        <div style='font-size:1rem;font-weight:bold'>{model_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>MARKET</div>
-                       <div style='font-size:1rem'>{mkt_str}</div></div>
+                       <div style='font-size:1rem; color: rgb(255, 255, 255);'>{mkt_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>EDGE</div>
                        <div style='font-size:1rem;font-weight:bold;color:#2ecc71'>+{b['abs_edge']:.1f} pts</div></div>
                 </div>
