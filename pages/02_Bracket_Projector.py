@@ -193,6 +193,41 @@ def simulate_region(seed_team: dict, deterministic: bool = True) -> list:
     return all_rounds
 
 
+def _project_game_row(ta, sa, tb, sb, round_num, label, round_name):
+    """
+    Return a display row + winner for a game.
+    team_a = lower seed (better seed by number). Model convention: positive spread = team_a favored.
+    We display from MODEL's perspective: show who the model actually likes.
+    """
+    proj = project_game(ta, tb, round_num=round_num, year=current_year)
+    if "error" in proj:
+        wp_a, sp = 0.5, 0.0
+    else:
+        wp_a = proj.get("win_prob_a", 0.5)
+        sp = proj.get("projected_spread", 0.0)  # model convention: positive = team_a wins
+
+    # Determine model pick (team with higher win probability)
+    if wp_a >= 0.5:
+        model_pick, pick_seed, opp, opp_seed = ta, sa, tb, sb
+        pick_wp = wp_a
+        # Spread from pick's perspective in betting convention (negative = pick is favored)
+        spread_display = f"{model_pick} {-sp:+.1f}"
+    else:
+        model_pick, pick_seed, opp, opp_seed = tb, sb, ta, sa
+        pick_wp = 1 - wp_a
+        # sp is team_a's spread; team_b's spread is -sp; betting convention: negate again
+        spread_display = f"{model_pick} {sp:+.1f}"
+
+    return {
+        "Round": round_name,
+        "Matchup": label,
+        "Model Pick": f"#{pick_seed} {model_pick}",
+        "Opponent": f"#{opp_seed} {opp}",
+        "Pick Win Prob": f"{pick_wp:.1%}",
+        "Model Spread": spread_display,
+    }, wp_a
+
+
 def simulate_final_four(region_winners: dict, deterministic: bool = True):
     """East vs West, South vs Midwest in F4."""
     matchups = [
@@ -202,47 +237,39 @@ def simulate_final_four(region_winners: dict, deterministic: bool = True):
     f4_winners = []
     games = []
     for (ta, sa), (tb, sb), label in matchups:
-        fav, fs, dog, ds = (ta, sa, tb, sb) if sa <= sb else (tb, sb, ta, sa)
-        proj = project_game(fav, dog, round_num=5, year=current_year)
-        if "error" in proj:
-            wp, sp = 0.5, 0.0
+        # Always put lower seed as team_a for canonical project_game call
+        if sa <= sb:
+            t_a, s_a, t_b, s_b = ta, sa, tb, sb
         else:
-            wp = proj.get("win_prob_a", 0.5)
-            sp = proj.get("projected_spread", 0.0)
+            t_a, s_a, t_b, s_b = tb, sb, ta, sa
+
+        row, wp_a = _project_game_row(t_a, s_a, t_b, s_b, 5, label, "Final Four")
 
         if deterministic:
-            winner = (fav, fs) if wp >= 0.5 else (dog, ds)
+            winner = (t_a, s_a) if wp_a >= 0.5 else (t_b, s_b)
         else:
-            winner = (fav, fs) if np.random.random() < wp else (dog, ds)
+            winner = (t_a, s_a) if np.random.random() < wp_a else (t_b, s_b)
+
+        row["Winner"] = f"#{winner[1]} {winner[0]}"
         f4_winners.append(winner)
-        games.append({
-            "Matchup": label, "Round": "Final Four",
-            "Favorite": f"#{fs} {fav}", "Underdog": f"#{ds} {dog}",
-            "Win Prob": f"{wp:.1%}", "Model Spread": f"{fav} {-sp:+.1f}",
-            "Winner": f"#{winner[1]} {winner[0]}",
-        })
+        games.append(row)
 
     # Championship
     (ca, csa), (cb, csb) = f4_winners[0], f4_winners[1]
-    fav, fs, dog, ds = (ca, csa, cb, csb) if csa <= csb else (cb, csb, ca, csa)
-    proj = project_game(fav, dog, round_num=6, year=current_year)
-    if "error" in proj:
-        wp, sp = 0.5, 0.0
+    if csa <= csb:
+        t_a, s_a, t_b, s_b = ca, csa, cb, csb
     else:
-        wp = proj.get("win_prob_a", 0.5)
-        sp = proj.get("projected_spread", 0.0)
+        t_a, s_a, t_b, s_b = cb, csb, ca, csa
+
+    row, wp_a = _project_game_row(t_a, s_a, t_b, s_b, 6, "Championship", "Championship")
 
     if deterministic:
-        champ = (fav, fs) if wp >= 0.5 else (dog, ds)
+        champ = (t_a, s_a) if wp_a >= 0.5 else (t_b, s_b)
     else:
-        champ = (fav, fs) if np.random.random() < wp else (dog, ds)
+        champ = (t_a, s_a) if np.random.random() < wp_a else (t_b, s_b)
 
-    games.append({
-        "Matchup": "Championship", "Round": "Championship",
-        "Favorite": f"#{fs} {fav}", "Underdog": f"#{ds} {dog}",
-        "Win Prob": f"{wp:.1%}", "Model Spread": f"{fav} {-sp:+.1f}",
-        "Winner": f"#{champ[1]} {champ[0]}",
-    })
+    row["Winner"] = f"#{champ[1]} {champ[0]}"
+    games.append(row)
     return games, champ
 
 
@@ -308,8 +335,9 @@ if run_btn:
         with st.spinner("Projecting Final Four..."):
             f4_games, champion = simulate_final_four(region_winners_det, deterministic=True)
 
-        f4_df = pd.DataFrame(f4_games)[["Round", "Matchup", "Favorite", "Underdog", "Win Prob", "Model Spread", "Winner"]]
+        f4_df = pd.DataFrame(f4_games)[["Round", "Matchup", "Model Pick", "Opponent", "Pick Win Prob", "Model Spread", "Winner"]]
         st.dataframe(f4_df, use_container_width=True, hide_index=True)
+        st.caption("**Model Pick** = team the model projects to win. **Pick Win Prob** = that team's win probability. **Model Spread** = projected margin in betting convention (negative = pick is favored).")
         st.markdown(f"## 🏆 National Champion: **{champion[0]}** (#{champion[1]} seed)")
 
     st.divider()
