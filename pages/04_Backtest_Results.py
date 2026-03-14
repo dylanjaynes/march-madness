@@ -312,6 +312,70 @@ if not preds_df.empty:
 else:
     st.info("No backtest predictions available. Ensure training data is loaded.")
 
+# ── Feature Importance ────────────────────────────────────────────────────────
+st.subheader("Feature Importance")
+st.caption("XGBoost feature importances from the final trained models (full dataset).")
+
+@st.cache_data(ttl=3600)
+def load_feature_importance():
+    from src.model.train import load_model, get_feature_importance
+    try:
+        spread_model = load_model("spread_model")
+        total_model  = load_model("total_model")
+        return get_feature_importance(spread_model), get_feature_importance(total_model)
+    except Exception as e:
+        return pd.DataFrame(), pd.DataFrame()
+
+fi_spread, fi_total = load_feature_importance()
+
+if not fi_spread.empty:
+    fi_col1, fi_col2 = st.columns(2)
+
+    with fi_col1:
+        st.markdown("**Spread Model**")
+        fig_fi_spread = px.bar(
+            fi_spread,
+            x="importance",
+            y="feature",
+            orientation="h",
+            color="importance",
+            color_continuous_scale="Blues",
+            labels={"importance": "Importance", "feature": "Feature"},
+        )
+        fig_fi_spread.update_layout(
+            yaxis={"categoryorder": "total ascending"},
+            coloraxis_showscale=False,
+            height=500,
+            margin=dict(l=0, r=0, t=0, b=0),
+        )
+        st.plotly_chart(fig_fi_spread, use_container_width=True)
+
+    with fi_col2:
+        st.markdown("**Total Model**")
+        fig_fi_total = px.bar(
+            fi_total,
+            x="importance",
+            y="feature",
+            orientation="h",
+            color="importance",
+            color_continuous_scale="Oranges",
+            labels={"importance": "Importance", "feature": "Feature"},
+        )
+        fig_fi_total.update_layout(
+            yaxis={"categoryorder": "total ascending"},
+            coloraxis_showscale=False,
+            height=500,
+            margin=dict(l=0, r=0, t=0, b=0),
+        )
+        st.plotly_chart(fig_fi_total, use_container_width=True)
+
+    # Dead-weight features (importance < 1%)
+    dead = fi_spread[fi_spread["importance"] < 0.01]["feature"].tolist()
+    if dead:
+        st.caption(f"Low-impact features (< 1% importance): {', '.join(dead)} — candidates for removal.")
+else:
+    st.info("Train models first to see feature importance.")
+
 st.divider()
 st.caption(
     "**Methodology:** Walk-forward: train on all years before test year. "
