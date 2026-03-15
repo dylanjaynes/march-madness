@@ -7,7 +7,9 @@ import numpy as np
 import plotly.express as px
 from collections import defaultdict
 
-from src.utils.config import TOURNAMENT_YEARS
+from src.utils.config import (
+    TOURNAMENT_YEARS, MISMATCH_SEED_DIFF_THRESHOLD, MISMATCH_BARTHAG_THRESHOLD,
+)
 from src.model.predict import project_game, season_label, data_as_of, spread_to_win_prob
 from src.model.train import load_model
 from src.features.matchup import build_matchup_features, MATCHUP_FEATURES
@@ -282,11 +284,35 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
 
     if feat_rows:
         bar.progress(0.5, text="Running model predictions...")
-        # Single batch predict for all matchups — load models just once
+        # Single batch predict for all matchups using hybrid model routing.
         try:
-            spread_model = load_model("spread_model")
             X = np.array(feat_rows)
-            spreads = spread_model.predict(X)
+
+            # Build mismatch mask from seed_diff (and barthag_diff if available)
+            seed_diffs = np.array([abs(sa - sb) for (ta, sa, tb, sb) in valid_pairs])
+            is_mismatch = seed_diffs >= MISMATCH_SEED_DIFF_THRESHOLD
+            if "barthag_diff" in MATCHUP_FEATURES:
+                bidx = list(MATCHUP_FEATURES).index("barthag_diff")
+                is_mismatch = is_mismatch | (np.abs(X[:, bidx]) >= MISMATCH_BARTHAG_THRESHOLD)
+
+            # Load hybrid models; fall back to legacy spread_model if missing
+            try:
+                comp_model = load_model("spread_competitive")
+                mis_model = load_model("spread_mismatch")
+                cal_comp = load_model("cal_competitive")
+                cal_mis = load_model("cal_mismatch")
+                spreads = np.zeros(len(X))
+                if is_mismatch.any():
+                    spreads[is_mismatch] = cal_mis.predict(
+                        mis_model.predict(X[is_mismatch])
+                    )
+                if (~is_mismatch).any():
+                    spreads[~is_mismatch] = cal_comp.predict(
+                        comp_model.predict(X[~is_mismatch])
+                    )
+            except FileNotFoundError:
+                spreads = load_model("spread_model").predict(X)
+
             for (ta, sa, tb, sb), spread in zip(valid_pairs, spreads):
                 wp_a = spread_to_win_prob(float(spread))
                 _wp_cache[(ta, tb)] = wp_a
