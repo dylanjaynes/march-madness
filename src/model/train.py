@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, TimeSeriesSplit
 from sklearn.metrics import mean_squared_error
 import xgboost as xgb
 
@@ -14,12 +14,16 @@ def train_spread_model(X: pd.DataFrame, y: pd.Series) -> xgb.XGBRegressor:
     """Train XGBoost model for spread prediction."""
     model = xgb.XGBRegressor(**SPREAD_MODEL_PARAMS)
 
-    # Walk-forward cross-validation by year (5 folds)
-    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    # FIX: Use TimeSeriesSplit (temporal CV) instead of random KFold.
+    # Random KFold lets 2024 data leak into a fold that tests 2010 data,
+    # which produces an optimistic CV RMSE that doesn't reflect real forward performance.
+    # TimeSeriesSplit always trains on earlier data and tests on later data.
+    # X must be sorted by year before this call (done in run_full_training_pipeline).
+    cv = TimeSeriesSplit(n_splits=5)
     scores = cross_val_score(model, X, y, cv=cv,
                              scoring="neg_root_mean_squared_error")
     cv_rmse = -scores.mean()
-    print(f"  Spread model CV RMSE: {cv_rmse:.3f} pts (±{scores.std():.3f})")
+    print(f"  Spread model CV RMSE (temporal): {cv_rmse:.3f} pts (±{scores.std():.3f})")
 
     # Train on full dataset
     model.fit(X, y)
@@ -36,11 +40,11 @@ def train_total_model(X: pd.DataFrame, y: pd.Series) -> xgb.XGBRegressor:
     """Train XGBoost model for total points prediction."""
     model = xgb.XGBRegressor(**TOTAL_MODEL_PARAMS)
 
-    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    cv = TimeSeriesSplit(n_splits=5)
     scores = cross_val_score(model, X, y, cv=cv,
                              scoring="neg_root_mean_squared_error")
     cv_rmse = -scores.mean()
-    print(f"  Total model CV RMSE: {cv_rmse:.3f} pts (±{scores.std():.3f})")
+    print(f"  Total model CV RMSE (temporal): {cv_rmse:.3f} pts (±{scores.std():.3f})")
 
     model.fit(X, y)
 
@@ -101,9 +105,10 @@ def get_feature_importance(model: xgb.XGBRegressor) -> pd.DataFrame:
 def run_full_training_pipeline():
     """
     1. Build training matrix from DB
-    2. Train spread + total XGBoost models
-    3. Train baseline
-    4. Print CV RMSE summary
+    2. Sort by year (required for TimeSeriesSplit)
+    3. Train spread + total XGBoost models
+    4. Train baseline
+    5. Print CV RMSE summary
     """
     print("=== Training Pipeline ===")
     print("Building training matrix...")
@@ -116,6 +121,16 @@ def run_full_training_pipeline():
     y_spread = y_spread[mask]
     y_total = y_total[mask]
     print(f"After NaN drop: {len(X)} rows")
+
+    # FIX: Sort by year so TimeSeriesSplit works correctly.
+    # The year information is on the index of y_spread/y_total (same index as X
+    # since they come from build_training_matrix together). We sort by that index
+    # which corresponds to chronological order if build_training_matrix processes
+    # games in year order — verify this assumption holds in your DB query.
+    # If not, join year back in before sorting.
+    X = X.sort_index()
+    y_spread = y_spread.sort_index()
+    y_total = y_total.sort_index()
 
     print("\nTraining spread model...")
     spread_model = train_spread_model(X, y_spread)

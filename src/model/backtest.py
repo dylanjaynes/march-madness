@@ -79,6 +79,10 @@ def run_backtest(years: list = None) -> dict:
     """
     Walk-forward backtest. For each test year, train on all prior years.
     Returns per-year and aggregate metrics dict.
+
+    KEY: market_spread and market_total are kept as NaN when no real line exists.
+    ATS and O/U grading ONLY happens on games with real market lines.
+    Games without lines still contribute to RMSE metrics.
     """
     from src.utils.config import SPREAD_MODEL_PARAMS, TOTAL_MODEL_PARAMS
 
@@ -90,10 +94,12 @@ def run_backtest(years: list = None) -> dict:
     if df.empty:
         raise ValueError("No training data. Run build_training_matrix() first.")
 
-    # Fill NaN market lines with naive KenPom-derived spread as proxy
-    # (We'll use model-vs-actual comparison as primary metric)
-    df["market_spread"] = df["market_spread"].fillna(0.0)
-    df["market_total"] = df["market_total"].fillna(df["actual_total"].mean())
+    # FIX 1: Do NOT fill NaN market lines.
+    # market_spread = NaN  → no real line available; exclude from ATS grading
+    # market_total  = NaN  → no real total available; exclude from O/U grading
+    # Previously: fillna(0.0) caused 0-spread games to be graded as valid lines,
+    # and fillna(mean) caused synthetic totals to be graded against real outcomes.
+    # Both inflated ATS/OU records dramatically.
 
     all_predictions = []
     per_year_metrics = {}
@@ -135,16 +141,24 @@ def run_backtest(years: list = None) -> dict:
         # Compute metrics
         actual_spreads = y_spread_test.values
         actual_totals = y_total_test.values
-        market_spreads = df_test.loc[X_test.index, "market_spread"].values
-        market_totals = df_test.loc[X_test.index, "market_total"].values
+        market_spreads = df_test.loc[X_test.index, "market_spread"].values   # may contain NaN
+        market_totals = df_test.loc[X_test.index, "market_total"].values      # may contain NaN
         round_nums = df_test.loc[X_test.index, "round_number"].values
 
         spread_rmse = np.sqrt(mean_squared_error(actual_spreads, pred_spread))
         total_rmse = np.sqrt(mean_squared_error(actual_totals, pred_total))
-        market_spread_rmse = np.sqrt(mean_squared_error(actual_spreads, market_spreads))
 
-        # True ATS analysis using real market lines
-        # mkt_spread == 0 means no real line (filled); skip from ATS buckets
+        # FIX 2: Market spread RMSE — only computed on games that actually have real lines.
+        # Previously used fillna(0.0) which made market_rmse nonsensical for early years.
+        has_real_spread = ~np.isnan(market_spreads.astype(float))
+        if has_real_spread.sum() >= 2:
+            market_spread_rmse = np.sqrt(mean_squared_error(
+                actual_spreads[has_real_spread], market_spreads[has_real_spread]
+            ))
+        else:
+            market_spread_rmse = float("nan")
+
+        # ATS/O/U: ONLY grade games with real market lines
         ats_all, ats_2, ats_3, ats_5 = [], [], [], []
         ou_all, ou_2, ou_3 = [], [], []
 
@@ -156,15 +170,16 @@ def run_backtest(years: list = None) -> dict:
             actual_margin = actual_spreads[j]
             actual_total = actual_totals[j]
 
-            # spread_edge meaningful only when real market line exists
-            spread_edge = model_spread - mkt_spread if mkt_spread != 0 else float("nan")
-            total_edge = model_total - mkt_total
+            # Determine if real lines exist
+            has_spread_line = not (mkt_spread is None or (isinstance(mkt_spread, float) and np.isnan(mkt_spread)))
+            has_total_line = not (mkt_total is None or (isinstance(mkt_total, float) and np.isnan(mkt_total)))
 
-            # True ATS graded from MODEL'S BET perspective:
-            #   spread_edge > 0 → bet team_a → WIN if actual_margin > market_spread
-            #   spread_edge < 0 → bet team_b → WIN if actual_margin < market_spread
-            if mkt_spread != 0:  # real market line
-                if not np.isnan(spread_edge) and spread_edge < 0:
+            # --- ATS grading (only when a real spread line exists) ---
+            if has_spread_line:
+                mkt_spread = float(mkt_spread)
+                spread_edge = model_spread - mkt_spread
+
+                if spread_edge < 0:
                     # Model likes team_b; team_b covers if actual_margin < market_spread
                     if actual_margin < mkt_spread:
                         ats_result = "WIN"
@@ -173,15 +188,16 @@ def run_backtest(years: list = None) -> dict:
                     else:
                         ats_result = "LOSS"
                 else:
-                    # Model likes team_a (or no edge); team_a covers if actual_margin > market_spread
+                    # Model likes team_a; team_a covers if actual_margin > market_spread
                     if actual_margin > mkt_spread:
                         ats_result = "WIN"
                     elif actual_margin == mkt_spread:
                         ats_result = "PUSH"
                     else:
                         ats_result = "LOSS"
+
                 ats_all.append(ats_result)
-                abs_edge = abs(spread_edge) if not np.isnan(spread_edge) else 0
+                abs_edge = abs(spread_edge)
                 if abs_edge >= 2:
                     ats_2.append(ats_result)
                 if abs_edge >= 3:
@@ -190,15 +206,28 @@ def run_backtest(years: list = None) -> dict:
                     ats_5.append(ats_result)
             else:
                 ats_result = "NO_LINE"
+                spread_edge = float("nan")
+                mkt_spread = float("nan")
 
-            ou_result = "WIN" if (model_total > mkt_total and actual_total > mkt_total) or \
-                                 (model_total < mkt_total and actual_total < mkt_total) else "LOSS"
-            if mkt_total > 0:
+            # FIX 3: O/U grading only when a REAL total line exists.
+            # Previously: fillna(mean) created synthetic totals that were then graded
+            # against actual outcomes — a direct data leak that inflated O/U accuracy.
+            if has_total_line:
+                mkt_total = float(mkt_total)
+                total_edge = model_total - mkt_total
+                ou_result = "WIN" if (
+                    (model_total > mkt_total and actual_total > mkt_total) or
+                    (model_total < mkt_total and actual_total < mkt_total)
+                ) else "LOSS"
                 ou_all.append(ou_result)
                 if abs(total_edge) >= 2:
                     ou_2.append(ou_result)
                 if abs(total_edge) >= 3:
                     ou_3.append(ou_result)
+            else:
+                total_edge = float("nan")
+                mkt_total = float("nan")
+                ou_result = "NO_LINE"
 
             all_predictions.append({
                 "year": test_year,
@@ -227,9 +256,12 @@ def run_backtest(years: list = None) -> dict:
                     "spread_rmse": np.sqrt(mean_squared_error(
                         rdf["actual_margin"], rdf["model_spread"]
                     )) if len(rdf) > 0 else None,
-                    "ats_record": _ats_record(rdf["ats_result"].tolist()),
+                    "ats_record": _ats_record(
+                        rdf[rdf["ats_result"].isin(["WIN", "LOSS", "PUSH"])]["ats_result"].tolist()
+                    ),
                 }
 
+        n_games_with_lines = len(ats_all)
         per_year_metrics[test_year] = {
             "spread_rmse": spread_rmse,
             "total_rmse": total_rmse,
@@ -245,7 +277,7 @@ def run_backtest(years: list = None) -> dict:
             "ou_roi_edge_3": calculate_roi([r for r in ou_3 if r != "PUSH"]),
             "by_round": by_round,
             "n_games": len(X_test),
-            "n_games_with_lines": len(ats_all),
+            "n_games_with_lines": n_games_with_lines,
             "train_years": train_years,
         }
 
@@ -264,11 +296,13 @@ def _compute_aggregate_metrics(df: pd.DataFrame) -> dict:
     spread_rmse = np.sqrt(mean_squared_error(df["actual_margin"], df["model_spread"]))
     total_rmse = np.sqrt(mean_squared_error(df["actual_total"], df["model_total"]))
 
-    # Market RMSE only over games with real lines
-    real_lines = df[df["market_spread"] != 0]
-    market_rmse = np.sqrt(mean_squared_error(real_lines["actual_margin"], real_lines["market_spread"])) if not real_lines.empty else 0.0
+    # Market RMSE only over games with real lines (non-NaN market_spread)
+    real_lines = df[df["market_spread"].notna() & (df["market_spread"] != 0)]
+    market_rmse = np.sqrt(mean_squared_error(
+        real_lines["actual_margin"], real_lines["market_spread"]
+    )) if len(real_lines) >= 2 else float("nan")
 
-    # True ATS: only games with real market lines (market_spread != 0)
+    # ATS: only games with real market lines
     ats_df = df[df["ats_result"].isin(["WIN", "LOSS", "PUSH"])].copy()
     ats_3_df = ats_df[ats_df["spread_edge"].abs() >= 3] if not ats_df.empty else ats_df
     ats_5_df = ats_df[ats_df["spread_edge"].abs() >= 5] if not ats_df.empty else ats_df
@@ -277,6 +311,7 @@ def _compute_aggregate_metrics(df: pd.DataFrame) -> dict:
     ats_3 = ats_3_df["ats_result"].tolist()
     ats_5 = ats_5_df["ats_result"].tolist()
 
+    # O/U: only games with real total lines
     ou_all_df = df[df["ou_result"].isin(["WIN", "LOSS"])]
     ou_3_df = ou_all_df[ou_all_df["total_edge"].abs() >= 3] if not ou_all_df.empty else ou_all_df
     ou_all = ou_all_df["ou_result"].tolist()
@@ -318,16 +353,18 @@ def generate_backtest_report(results: dict) -> pd.DataFrame:
 
         w, l, p = ats_all
         w3, l3, p3 = ats_3
+        mkt_rmse = metrics.get("vs_market_spread_rmse", float("nan"))
+        mkt_rmse_str = f"{mkt_rmse:.2f}" if not np.isnan(mkt_rmse) else "—"
         rows.append({
             "Year": str(year),
             "All Games": metrics.get("n_games", 0),
             "w/ Lines": n_lines,
             "Spread RMSE": round(metrics.get("spread_rmse", 0), 2),
-            "Market RMSE": round(metrics.get("vs_market_spread_rmse", 0), 2),
+            "Market RMSE": mkt_rmse_str,
             "True ATS (All)": f"{w}-{l}-{p} ({_pct(w,l)})" if n_lines > 0 else "no lines",
             "True ATS (Edge≥3)": f"{w3}-{l3}-{p3} ({_pct(w3,l3)})" if (w3+l3) > 0 else "—",
             "ATS ROI (Edge≥3)": f"{metrics.get('ats_roi_edge_3', 0):.1f}%" if (w3+l3) > 0 else "—",
-            "O/U (All)": f"{ou_all[0]}-{ou_all[1]}-{ou_all[2]}",
+            "O/U (All)": f"{ou_all[0]}-{ou_all[1]}-{ou_all[2]}" if sum(ou_all) > 0 else "no lines",
         })
 
     # Add aggregate row
@@ -338,12 +375,13 @@ def generate_backtest_report(results: dict) -> pd.DataFrame:
     w3, l3, p3 = ats_3_agg
     pct_all = f"{w/(w+l)*100:.1f}%" if (w + l) > 0 else "—"
     pct_3 = f"{w3/(w3+l3)*100:.1f}%" if (w3 + l3) > 0 else "—"
+    agg_mkt_rmse = results.get("vs_market_spread_rmse", float("nan"))
     rows.append({
         "Year": "TOTAL",
         "All Games": results.get("n_games_total", 0),
         "w/ Lines": w + l + p,
         "Spread RMSE": round(results.get("spread_rmse", 0), 2),
-        "Market RMSE": round(results.get("vs_market_spread_rmse", 0), 2),
+        "Market RMSE": f"{agg_mkt_rmse:.2f}" if not np.isnan(agg_mkt_rmse) else "—",
         "True ATS (All)": f"{w}-{l}-{p} ({pct_all})",
         "True ATS (Edge≥3)": f"{w3}-{l3}-{p3} ({pct_3})",
         "ATS ROI (Edge≥3)": f"{results.get('ats_roi_edge_3', 0):.1f}%",
