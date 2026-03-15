@@ -4,8 +4,10 @@ Sports Reference and stores it in the tournament_bracket table.
 
 Works as soon as Sports Reference publishes the bracket (typically within
 hours of Selection Sunday). Also supports fetching projected brackets
-from BartTorvik before the official announcement.
+from ESPN Bracketology (Joe Lunardi) before the official announcement.
 """
+import json
+import re
 import time
 import requests
 from datetime import datetime, timezone
@@ -101,6 +103,155 @@ def _parse_seed_team(td) -> tuple:
     raw_name = name_link.text.strip()
     team = normalize_team_name(raw_name) if is_known_team(raw_name) else raw_name
     return seed, team
+
+
+# ── Projected bracket (CBS Sports Bracketology — Jerry Palm) ──────────────────
+
+_PROJ_REGIONS = {"East", "West", "South", "Midwest"}
+
+# Short-name → canonical normalizations for CBS Sports team names
+_CBS_NAME_FIXES = {
+    "UConn": "Connecticut",
+    "UCONN": "Connecticut",
+    "Ole Miss": "Mississippi",
+    "USC": "Southern California",
+    "UNLV": "Nevada-Las Vegas",
+    "UAB": "Alabama-Birmingham",
+    "UTEP": "Texas-El Paso",
+    "UTSA": "Texas-San Antonio",
+    "SMU": "Southern Methodist",
+    "LSU": "Louisiana State",
+    "TCU": "Texas Christian",
+    "UCF": "Central Florida",
+    "BYU": "Brigham Young",
+    "VCU": "Virginia Commonwealth",
+    "UNC": "North Carolina",
+    "UNC Wilmington": "North Carolina-Wilmington",
+    "NC State": "North Carolina State",
+    "UNCW": "North Carolina-Wilmington",
+    "St. John's": "St. John's (NY)",
+    "St. John's (N.Y.)": "St. John's (NY)",
+    "Miami (FL)": "Miami (Florida)",
+    "Miami": "Miami (Florida)",
+    "Pitt": "Pittsburgh",
+    "FGCU": "Florida Gulf Coast",
+    "FIU": "Florida International",
+    "FAU": "Florida Atlantic",
+    "FDU": "Fairleigh Dickinson",
+    "ETSU": "East Tennessee State",
+    "SIUE": "SIU Edwardsville",
+    "LIU": "Long Island University",
+    "LMU": "Loyola Marymount",
+    "UMass": "Massachusetts",
+    "UIC": "Illinois-Chicago",
+    "UAlbany": "Albany",
+    "UMBC": "Maryland-Baltimore County",
+    "UNC Asheville": "North Carolina-Asheville",
+    "UNC Greensboro": "North Carolina-Greensboro",
+    "UMKC": "Kansas City",
+    "UT Martin": "Tennessee-Martin",
+    "Michigan St.": "Michigan State",
+    "Iowa St.": "Iowa State",
+    "Kansas St.": "Kansas State",
+    "Mississippi St.": "Mississippi State",
+    "Ohio St.": "Ohio State",
+    "Penn St.": "Penn State",
+    "Oklahoma St.": "Oklahoma State",
+    "Arizona St.": "Arizona State",
+    "Florida St.": "Florida State",
+    "Oregon St.": "Oregon State",
+    "Colorado St.": "Colorado State",
+    "Fresno St.": "Fresno State",
+    "Utah St.": "Utah State",
+    "Boise St.": "Boise State",
+    "San Diego St.": "San Diego State",
+    "Sacramento St.": "Sacramento State",
+    "N. Carolina": "North Carolina",
+    "N. Iowa": "Northern Iowa",
+    "N. Dakota St.": "North Dakota State",
+    "S. Dakota St.": "South Dakota State",
+    "SE Louisiana": "Southeastern Louisiana",
+    "E. Washington": "Eastern Washington",
+    "W. Kentucky": "Western Kentucky",
+    "S. Illinois": "Southern Illinois",
+    "Mid. Tennessee": "Middle Tennessee",
+    "McNeese": "McNeese State",
+    "Kennesaw St.": "Kennesaw State",
+}
+
+
+def _normalize_cbs_name(raw: str) -> str:
+    """Normalize a CBS Sports short team name to the canonical DB name."""
+    raw = raw.strip()
+    if raw in _CBS_NAME_FIXES:
+        return _CBS_NAME_FIXES[raw]
+    if is_known_team(raw):
+        return normalize_team_name(raw)
+    return raw
+
+
+def fetch_projected_bracket_cbs() -> dict:
+    """
+    Fetch Jerry Palm's CBS Sports Bracketology projected bracket.
+
+    CBS Sports renders the bracket server-side with clear CSS classes:
+      .bracket-table-wrapper > .bracket-table-left/.bracket-table-right
+        > .region-title  (East / West / South / Midwest)
+        > .bracket-row > .bracket-row-seed + .full-width (seed + team)
+
+    Returns {"East": {1: "Duke", ...}, ...} or {} on failure.
+    """
+    url = "https://www.cbssports.com/college-basketball/bracketology/"
+    print(f"  [cbs_bracket] Fetching {url}")
+    time.sleep(1.0)
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=25)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"  [cbs_bracket] Fetch failed: {e}")
+        return {}
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    bracket = {}
+
+    for wrapper in soup.find_all(class_="bracket-table-wrapper"):
+        for side in ("bracket-table-left", "bracket-table-right"):
+            half = wrapper.find(class_=side)
+            if not half:
+                continue
+            region_el = half.find(class_="region-title")
+            region = region_el.text.strip() if region_el else None
+            if not region or region not in _PROJ_REGIONS:
+                continue
+
+            seed_team: dict[int, str] = {}
+            for row in half.find_all(class_="bracket-row"):
+                seed_el = row.find(class_="bracket-row-seed")
+                name_el = row.find(class_="full-width")
+                if not seed_el or not name_el:
+                    continue
+                try:
+                    seed = int(seed_el.text.strip())
+                    name = name_el.text.strip()
+                    if 1 <= seed <= 16 and name:
+                        seed_team[seed] = _normalize_cbs_name(name)
+                except (ValueError, AttributeError):
+                    pass
+            if seed_team:
+                bracket[region] = seed_team
+
+    n = sum(len(v) for v in bracket.values())
+    print(f"  [cbs_bracket] Parsed {n} teams across {len(bracket)} regions")
+    return bracket
+
+
+def fetch_and_store_projected_bracket_espn(year: int) -> dict:
+    """Compatibility shim: now fetches CBS Sports bracketology, stores in DB, returns dict."""
+    bracket = fetch_projected_bracket_cbs()
+    if bracket:
+        store_bracket(year, bracket)
+    return bracket
 
 
 def store_bracket(year: int, bracket: dict) -> int:

@@ -13,7 +13,10 @@ from src.utils.config import (
 from src.model.predict import project_game, season_label, data_as_of, spread_to_win_prob
 from src.model.train import load_model
 from src.features.matchup import build_matchup_features, MATCHUP_FEATURES
-from src.ingest.bracket import fetch_and_store_bracket, load_bracket_from_db, get_bracket_status
+from src.ingest.bracket import (
+    fetch_and_store_bracket, fetch_and_store_projected_bracket_espn,
+    load_bracket_from_db, get_bracket_status,
+)
 from src.features.team_ratings import load_ratings_cache, clear_ratings_cache
 
 st.set_page_config(page_title="Bracket Projector", page_icon="🔢", layout="wide")
@@ -86,7 +89,7 @@ DEFAULT_TEAMS = _db_bracket if _db_bracket else _PROJECTED_TEAMS
 _bracket_source = "official" if _db_bracket else "projected"
 
 # ── Bracket fetch UI ──────────────────────────────────────────────────────────
-_col_status, _col_btn = st.columns([3, 1])
+_col_status, _col_espn, _col_official = st.columns([3, 1, 1])
 with _col_status:
     if _bracket_source == "official":
         st.success(
@@ -95,10 +98,35 @@ with _col_status:
             icon=None,
         )
     else:
-        st.info("📋 **Using projected bracket** — click to load the official bracket once released on Selection Sunday.", icon=None)
+        st.info(
+            "📋 **Using projected bracket** — click **CBS Bracketology** to load Jerry Palm's latest "
+            "projections, or **Official Bracket** after Selection Sunday.",
+            icon=None,
+        )
 
-with _col_btn:
-    if st.button("🔄 Load Official Bracket", use_container_width=True,
+with _col_espn:
+    if st.button("📡 CBS Bracketology", use_container_width=True,
+                 help="Loads Jerry Palm's latest bracket projection from CBS Sports. Updates frequently before Selection Sunday."):
+        with st.spinner("Fetching CBS Sports Bracketology..."):
+            try:
+                bracket = fetch_and_store_projected_bracket_espn(current_year)
+                if bracket:
+                    n = sum(len(v) for v in bracket.values())
+                    st.success(f"✅ Loaded {n} teams from CBS Sports Bracketology!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning(
+                        "Could not parse CBS Sports bracketology — the page structure may "
+                        "have changed. Try the official bracket after Selection Sunday, "
+                        "or enter teams manually above.",
+                        icon="⚠️",
+                    )
+            except Exception as e:
+                st.error(f"CBS fetch failed: {e}")
+
+with _col_official:
+    if st.button("🔄 Official Bracket", use_container_width=True,
                  help="Fetches the official bracket from Sports Reference. Available after Selection Sunday."):
         with st.spinner("Fetching bracket from Sports Reference..."):
             try:
