@@ -40,7 +40,7 @@ EST = pytz.timezone("US/Eastern")
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Settings")
-    bankroll = st.number_input("Bankroll ($)", min_value=100, max_value=1_000_000,
+    bankroll = st.number_input("Bankroll ($)", min_value=50, max_value=1_000_000,
                                 value=1000, step=100)
     sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
     min_edge = st.slider("Min |edge| (pts)", 0.0, 15.0, 0.0, 0.5)
@@ -503,6 +503,7 @@ for date, tab in zip(dates, date_tabs):
                     mkt_html = (
                         f"<div style='font-size:0.75rem;color:#aaa'>{pg_label}</div>"
                         f"<div style='font-size:0.95rem'>{pg_display}</div>"
+                        f"<div style='font-size:0.95rem'>DEBUG: Live {live_ta} -- {pg_display}</div>"
                         f"<div style='font-size:0.75rem;color:#aaa'>&nbsp;</div>"
                     )
                 # Total line movement note
