@@ -67,6 +67,24 @@ TOTAL_MODEL_PARAMS = {
     "random_state": 42,
 }
 
+# Hybrid model thresholds
+MISMATCH_SEED_DIFF_THRESHOLD = 5
+MISMATCH_BARTHAG_THRESHOLD = 0.3
+
+# Competitive game model (XGBoost, same architecture as SPREAD_MODEL_PARAMS)
+COMPETITIVE_MODEL_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "random_state": 42,
+}
+
+# Mismatch game model (Ridge — no prediction ceiling)
+MISMATCH_MODEL_PARAMS = {"alpha": 1.0}
+
 # Adjustments
 NEUTRAL_SITE_ADJUSTMENT = 0
 TOURNAMENT_PACE_HAIRCUT = -2.5

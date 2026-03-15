@@ -57,6 +57,9 @@ def data_as_of(year: int) -> str:
 from src.features.matchup import MATCHUP_FEATURES, build_matchup_features
 from src.features.adjustments import apply_tournament_pace_adjustment
 from src.model.train import load_model
+from src.utils.config import (
+    MISMATCH_SEED_DIFF_THRESHOLD, MISMATCH_BARTHAG_THRESHOLD,
+)
 
 
 def spread_to_win_prob(spread: float, std_dev: float = SPREAD_STD_DEV) -> float:
@@ -67,6 +70,19 @@ def spread_to_win_prob(spread: float, std_dev: float = SPREAD_STD_DEV) -> float:
     return float(norm.cdf(0, loc=-spread, scale=std_dev))
 
 
+def _load_hybrid_models():
+    """
+    Try to load all four hybrid model files.
+    Returns (comp_model, mis_model, cal_comp, cal_mis) or raises FileNotFoundError.
+    """
+    return (
+        load_model("spread_competitive"),
+        load_model("spread_mismatch"),
+        load_model("cal_competitive"),
+        load_model("cal_mismatch"),
+    )
+
+
 def project_game(team_a: str, team_b: str,
                  round_num: int, year: int = None,
                  seed_a: int = None, seed_b: int = None,
@@ -75,15 +91,15 @@ def project_game(team_a: str, team_b: str,
     Project spread and total for a single tournament game.
     Results are always returned from the perspective of the better seed (lower number).
     Input order doesn't matter — teams are reordered to match training convention.
+
+    Uses the two-stage hybrid model when available (spread_competitive.pkl +
+    spread_mismatch.pkl + calibrators), falling back to spread_model.pkl otherwise.
+    The returned dict includes is_mismatch (bool) so the UI can annotate the game.
     """
     if year is None:
         year = TOURNAMENT_YEARS[-1]
 
-    # Enforce a canonical team ordering so the same matchup always produces
-    # the same features regardless of input order.
-    # When seeds aren't supplied, look them up from the DB.
-    # Priority: (1) better seed (lower number) is team_a,
-    #           (2) alphabetical tiebreaker when seeds are equal or unknown.
+    # Canonical team ordering: better seed (lower number) is team_a.
     if seed_a is None or seed_b is None:
         from src.utils.db import query_df
         rows = query_df(
@@ -102,8 +118,18 @@ def project_game(team_a: str, team_b: str,
     else:
         seed_a, seed_b = sa, sb
 
+    # Try hybrid model first; fall back to legacy spread_model.pkl.
     try:
-        spread_model = load_model("spread_model")
+        comp_model, mis_model, cal_comp, cal_mis = _load_hybrid_models()
+        use_hybrid = True
+    except FileNotFoundError:
+        try:
+            spread_model = load_model("spread_model")
+        except FileNotFoundError as e:
+            return {"error": str(e)}
+        use_hybrid = False
+
+    try:
         total_model = load_model("total_model")
     except FileNotFoundError as e:
         return {"error": str(e)}
@@ -123,11 +149,33 @@ def project_game(team_a: str, team_b: str,
 
     X = feats[MATCHUP_FEATURES].values.reshape(1, -1)
 
-    projected_spread = float(spread_model.predict(X)[0])
+    if use_hybrid:
+        seed_diff = seed_a - seed_b  # negative when team_a is better seed
+
+        # Check barthag_diff if available in feats
+        barthag_diff = None
+        if "barthag_diff" in feats.columns:
+            v = feats["barthag_diff"].values[0]
+            if not (v != v):  # NaN check
+                barthag_diff = float(v)
+
+        is_mismatch = abs(seed_diff) >= MISMATCH_SEED_DIFF_THRESHOLD
+        if barthag_diff is not None:
+            is_mismatch = is_mismatch or abs(barthag_diff) >= MISMATCH_BARTHAG_THRESHOLD
+
+        if is_mismatch:
+            raw_spread = float(mis_model.predict(X)[0])
+            projected_spread = float(cal_mis.predict([raw_spread])[0])
+        else:
+            raw_spread = float(comp_model.predict(X)[0])
+            projected_spread = float(cal_comp.predict([raw_spread])[0])
+    else:
+        is_mismatch = False
+        projected_spread = float(spread_model.predict(X)[0])
+
     projected_total_raw = float(total_model.predict(X)[0])
     projected_total = apply_tournament_pace_adjustment(projected_total_raw)
 
-    # Back-calculate individual scores
     projected_score_a = (projected_total + projected_spread) / 2
     projected_score_b = (projected_total - projected_spread) / 2
 
@@ -146,6 +194,7 @@ def project_game(team_a: str, team_b: str,
         "projected_score_b": projected_score_b,
         "win_prob_a": win_prob_a,
         "win_prob_b": 1 - win_prob_a,
+        "is_mismatch": is_mismatch,
     }
 
 
