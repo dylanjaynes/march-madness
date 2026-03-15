@@ -729,6 +729,8 @@ if run_btn:
 
     # ── Step 3: Monte Carlo simulations (instant from cache) ──────────────────
     champion_counts: dict = defaultdict(int)
+    # Key: (team, region) to avoid double-counting when the same team name
+    # appears in multiple regions (e.g. "Connecticut" in South AND Midwest).
     round_adv: dict = defaultdict(lambda: defaultdict(int))
     for sim in range(n_sims):
         sim_winners = {}
@@ -739,7 +741,7 @@ if run_btn:
             sim_winners[region] = sim_rounds[-1][0]
             for ri, survivors in enumerate(sim_rounds[1:], 2):
                 for team, seed in survivors:
-                    round_adv[team][ri] += 1
+                    round_adv[(team, region)][ri] += 1   # scoped to region
         _, sim_champ = simulate_final_four(
             sim_winners, deterministic=False, use_cache=True, chaos=chaos
         )
@@ -778,7 +780,7 @@ if run_btn:
     # ── Render visual bracket ─────────────────────────────────────────────────
     st.subheader("Projected Bracket")
     import streamlit.components.v1 as components
-    components.html(bracket_html, height=1050, scrolling=False)
+    components.html(bracket_html, height=1150, scrolling=True)
 
     st.divider()
 
@@ -801,15 +803,38 @@ if run_btn:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        all_teams_set = {t for r in REGIONS for t in region_seed_team[r].values() if t}
+        # Build team-region pairs; if a team name appears in >1 region,
+        # label it as "Team (Region)" to distinguish the two bracket slots.
+        team_region_pairs = [
+            (team, region)
+            for region in REGIONS
+            for team in region_seed_team[region].values()
+            if team
+        ]
+        # Remove exact duplicates (same team + same region listed twice)
+        seen = set()
+        team_region_pairs = [
+            tr for tr in team_region_pairs
+            if not (tr in seen or seen.add(tr))
+        ]
+        team_name_counts = defaultdict(int)
+        for team, region in team_region_pairs:
+            team_name_counts[team] += 1
+
         adv_rows = []
-        for team in sorted(all_teams_set):
+        for team, region in sorted(team_region_pairs):
+            display_name = (
+                f"{team} ({region[:2]})"
+                if team_name_counts[team] > 1
+                else team
+            )
+            key = (team, region)
             adv_rows.append({
-                "Team": team,
-                "R32 %":   round(round_adv[team].get(2, 0) / n_sims * 100, 1),
-                "S16 %":   round(round_adv[team].get(3, 0) / n_sims * 100, 1),
-                "E8 %":    round(round_adv[team].get(4, 0) / n_sims * 100, 1),
-                "F4 %":    round(round_adv[team].get(5, 0) / n_sims * 100, 1),
+                "Team":    display_name,
+                "R32 %":   round(round_adv[key].get(2, 0) / n_sims * 100, 1),
+                "S16 %":   round(round_adv[key].get(3, 0) / n_sims * 100, 1),
+                "E8 %":    round(round_adv[key].get(4, 0) / n_sims * 100, 1),
+                "F4 %":    round(round_adv[key].get(5, 0) / n_sims * 100, 1),
                 "Champ %": round(champion_counts.get(team, 0) / n_sims * 100, 1),
             })
         if adv_rows:
