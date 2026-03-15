@@ -9,6 +9,7 @@ from pathlib import Path
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, PROCESSED_DIR
 from src.utils.db import query_df, db_conn, upsert_df
 from src.model.predict import project_game
+from src.utils.team_map import normalize_team_name
 
 st.set_page_config(page_title="Model Results", page_icon="📋", layout="wide")
 
@@ -171,10 +172,14 @@ def load_graded_data(year: int) -> pd.DataFrame:
         params=[year],
     )
 
-    # Build lookup: frozenset{team1_lower, team2_lower} → row
+    # Build lookup: frozenset{canonical_lower, canonical_lower} → row
+    # normalize_team_name resolves aliases (e.g. "Omaha" → "Nebraska-Omaha")
+    # so lines and results tables match even when source spellings differ.
     lines_lookup = {}
     for _, lr in lines.iterrows():
-        k = frozenset({str(lr["team1"]).lower(), str(lr["team2"]).lower()})
+        t1n = normalize_team_name(str(lr["team1"])).lower()
+        t2n = normalize_team_name(str(lr["team2"])).lower()
+        k = frozenset({t1n, t2n})
         lines_lookup[k] = lr
 
     # ── 3. OOS backtest predictions lookup (keyed by frozenset of team names) ──
@@ -232,6 +237,17 @@ def load_graded_data(year: int) -> pd.DataFrame:
                 proj = {"error": "model failed"}
 
             if "error" in proj:
+                # Model couldn't project (e.g. team not in Torvik ratings).
+                # Still look up the market line so the game appears in the table.
+                t1n_e = normalize_team_name(t1).lower()
+                t2n_e = normalize_team_name(t2).lower()
+                lr_e = lines_lookup.get(frozenset({t1n_e, t2n_e}))
+                mkt_s_e = mkt_t_e = None
+                if lr_e is not None and pd.notna(lr_e.get("spread_line")):
+                    raw_e = float(lr_e["spread_line"])
+                    mkt_s_e = raw_e if t1.lower() == team_a.lower() else -raw_e
+                if lr_e is not None and pd.notna(lr_e.get("total_line")):
+                    mkt_t_e = float(lr_e["total_line"])
                 rows.append({
                     "game_date": g["game_date"],
                     "round_num": round_num,
@@ -241,10 +257,10 @@ def load_graded_data(year: int) -> pd.DataFrame:
                     "actual_margin_a": actual_margin_a,
                     "actual_total": actual_total,
                     "model_spread": None, "model_total": None,
-                    "market_spread_a": None, "market_total": None,
+                    "market_spread_a": mkt_s_e, "market_total": mkt_t_e,
                     "spread_edge": None, "total_edge": None,
                     "ats_result": "—", "ou_result": "—",
-                    "has_line": False, "is_oos": False,
+                    "has_line": mkt_s_e is not None, "is_oos": False,
                 })
                 continue
 
@@ -253,7 +269,9 @@ def load_graded_data(year: int) -> pd.DataFrame:
 
         # ── Pre-game market line from team_a perspective ───────────────────────
         # historical_lines.spread_line convention: positive = team1 favored
-        lr = lines_lookup.get(frozenset({t1.lower(), t2.lower()}))
+        t1n = normalize_team_name(t1).lower()
+        t2n = normalize_team_name(t2).lower()
+        lr = lines_lookup.get(frozenset({t1n, t2n}))
         market_spread_a = market_total = None
         if lr is not None and pd.notna(lr.get("spread_line")):
             raw = float(lr["spread_line"])

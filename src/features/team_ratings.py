@@ -65,6 +65,17 @@ def build_team_feature_vector(team: str, year: int, as_of_date: str = None) -> d
             sql_ci = "SELECT * FROM torvik_ratings WHERE year = ? AND LOWER(team) = LOWER(?)"
             rows = query_df(sql_ci, params=[year, team])
 
+    # Final fallback: hyphen → space normalization
+    # Handles "Nebraska-Omaha" → "Nebraska Omaha", "UC-San Diego" → "UC San Diego",
+    # "SIU-Edwardsville" → "SIU Edwardsville", etc.
+    if rows.empty:
+        alt = team.replace("-", " ")
+        if alt != team:
+            rows = query_df(
+                "SELECT * FROM torvik_ratings WHERE year = ? AND LOWER(team) = LOWER(?)",
+                params=[year, alt],
+            )
+
     if rows.empty:
         return {}
     return rows.iloc[0].to_dict()
