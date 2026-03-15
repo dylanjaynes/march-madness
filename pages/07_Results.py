@@ -517,7 +517,9 @@ for date_str, tab in zip(dates, date_tabs):
 
             # O/U caption
             mt = row.get("market_total")
-            mt_str = f"O/U {mt:.1f} · model {row['model_total']:.1f} · actual {int(row['actual_total'])}" if mt else ""
+            model_total_val = row.get("model_total")
+            model_total_str = f"{model_total_val:.1f}" if model_total_val is not None and pd.notna(model_total_val) else "—"
+            mt_str = f"O/U {mt:.1f} · model {model_total_str} · actual {int(row['actual_total'])}" if mt else ""
 
             c1, c2, c3, c4, c5, c6 = st.columns([3, 1.4, 2.2, 2.2, 1.2, 1.2])
 
