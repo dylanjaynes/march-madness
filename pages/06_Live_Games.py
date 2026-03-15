@@ -164,11 +164,13 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             date_label = local_dt.strftime("%A, %b %d")
             time_label = local_dt.strftime("%I:%M %p").lstrip("0")
             days_out   = (dt.date() - now_utc.date()).days
+            is_live    = dt <= now_utc   # tip-off time has passed
         except Exception:
             date_key = commence[:10]
             date_label = commence[:10]
             time_label = ""
             days_out = 0
+            is_live  = False
 
         proj = project_game(home, away, round_num=round_ctx, year=yr)
         if "error" in proj:
@@ -281,7 +283,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             "date_label":  date_label,
             "days_out":    days_out,
             "time":        time_label,
-            "game_started": days_out < 0,
+            "is_live":     is_live,
             # canonical teams (for reference)
             "team_a": ta, "team_b": tb,
             # pick-perspective display fields
@@ -436,7 +438,14 @@ for date, tab in zip(dates, date_tabs):
             st.caption("No games match current filters for this day.")
             continue
 
-        for _, row in day_df.iterrows():
+        # Split live vs upcoming games
+        live_df     = day_df[day_df["is_live"] == True]
+        upcoming_df = day_df[day_df["is_live"] == False]
+
+        if not live_df.empty:
+            st.markdown("### 🔴 In Progress")
+
+        for _, row in live_df.iterrows():
             tier_colors = {
                 "Strong": ("#1a472a", "#2ecc71"),
                 "Value":  ("#1e3a5f", "#3498db"),
@@ -462,8 +471,10 @@ for date, tab in zip(dates, date_tabs):
             with c1:
                 st.markdown(
                     f"<div style='padding:4px 0'>"
-                    f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span><br>"
-                    f"<span style='color:#aaa;font-size:0.8rem'>{row['time']}</span>"
+                    f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span>"
+                    f"<span style='margin-left:8px;background:#c0392b;color:#fff;"
+                    f"font-size:0.65rem;font-weight:bold;padding:2px 6px;border-radius:4px'>🔴 LIVE</span><br>"
+                    f"<span style='color:#aaa;font-size:0.8rem'>Started {row['time']}</span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -498,12 +509,11 @@ for date, tab in zip(dates, date_tabs):
                         f"<div style='font-size:0.7rem;color:#f39c12'>LIVE {live_display} {line_move_dir}</div>"
                     )
                 else:
-                    # No movement — label clearly as pre-game
-                    pg_label = "PRE-GAME" if not row.get("game_started") else "OPEN LINE"
+                    # No movement — label clearly as pre-game or open line
+                    pg_label = "OPEN LINE" if row.get("is_live") else "PRE-GAME"
                     mkt_html = (
                         f"<div style='font-size:0.75rem;color:#aaa'>{pg_label}</div>"
                         f"<div style='font-size:0.95rem'>{pg_display}</div>"
-                        f"<div style='font-size:0.95rem'>DEBUG: Live {live_ta} -- {pg_display}</div>"
                         f"<div style='font-size:0.75rem;color:#aaa'>&nbsp;</div>"
                     )
                 # Total line movement note
@@ -548,6 +558,115 @@ for date, tab in zip(dates, date_tabs):
             if ou_str:
                 st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
             st.divider()
+
+        # ── Upcoming (pre-game) ────────────────────────────────────────────────
+        if not upcoming_df.empty:
+            if not live_df.empty:
+                st.markdown("### 📋 Upcoming")
+            for _, row in upcoming_df.iterrows():
+                tier_colors = {
+                    "Strong": ("#1a472a", "#2ecc71"),
+                    "Value":  ("#1e3a5f", "#3498db"),
+                    "Lean":   ("#3d2b1f", "#f39c12"),
+                    "Pass":   ("#2a2a2a", "#7f8c8d"),
+                }
+                bg, accent = tier_colors.get(row["tier_label"], ("#2a2a2a", "#aaa"))
+
+                model_str = f"{row['pick']} {row['pick_model_display']:+.1f}"
+                mkt_str   = (f"{row['pick']} {row['pick_mkt_display']:+.1f}"
+                             if row["pick_mkt_display"] is not None else "—")
+                edge_str  = f"+{row['abs_edge']:.1f}" if row["abs_edge"] is not None else "—"
+
+                ou_str = ""
+                if row["total_edge"] is not None:
+                    direction = "Over" if row["total_edge"] > 0 else "Under"
+                    ou_str = (f"O/U: model {row['model_total']} vs {row['mkt_total']} "
+                              f"({direction} {abs(row['total_edge']):.1f})")
+
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
+
+                with c1:
+                    st.markdown(
+                        f"<div style='padding:4px 0'>"
+                        f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span><br>"
+                        f"<span style='color:#aaa;font-size:0.8rem'>{row['time']}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c2:
+                    score_line = f"{row['pick_score']:.0f} – {row['opp_score']:.0f}"
+                    st.markdown(
+                        f"<div style='text-align:center;padding:4px'>"
+                        f"<div style='color:#aaa;font-size:0.75rem'>PROJECTED</div>"
+                        f"<div style='font-size:0.95rem;font-weight:600'>{model_str}</div>"
+                        f"<div style='color:#aaa;font-size:0.75rem'>{score_line}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c3:
+                    pg_display = (
+                        f"{row['pick']} {row['pick_mkt_display']:+.1f}"
+                        if row["pick_mkt_display"] is not None else "—"
+                    )
+                    if row.get("line_moved") and row.get("live_spread_ta") is not None:
+                        live_ta = row["live_spread_ta"]
+                        if row["pick"] == row["team_a"]:
+                            live_display = f"{row['pick']} {-live_ta:+.1f}"
+                        else:
+                            live_display = f"{row['pick']} {live_ta:+.1f}"
+                        line_move_dir = "▲" if (live_ta > (row.get("pregame_spread_ta") or live_ta)) else "▼"
+                        mkt_html = (
+                            f"<div style='font-size:0.75rem;color:#aaa'>OPEN</div>"
+                            f"<div style='font-size:0.95rem;font-weight:600'>{pg_display}</div>"
+                            f"<div style='font-size:0.7rem;color:#f39c12'>LIVE {live_display} {line_move_dir}</div>"
+                        )
+                    else:
+                        mkt_html = (
+                            f"<div style='font-size:0.75rem;color:#aaa'>PRE-GAME</div>"
+                            f"<div style='font-size:0.95rem'>{pg_display}</div>"
+                            f"<div style='font-size:0.75rem;color:#aaa'>&nbsp;</div>"
+                        )
+                    if row.get("total_moved") and row.get("live_total") is not None:
+                        total_note = f"<div style='font-size:0.7rem;color:#f39c12'>O/U open {row['pregame_total']} → live {row['live_total']}</div>"
+                    else:
+                        total_note = ""
+                    st.markdown(
+                        f"<div style='text-align:center;padding:4px'>"
+                        f"{mkt_html}"
+                        f"<div style='color:{accent};font-weight:bold;margin-top:2px'>{edge_str} pts edge</div>"
+                        f"{total_note}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c4:
+                    win_pct = f"{row['pick_win_prob']:.0%} / {row['opp_win_prob']:.0%}"
+                    cov_str = f"{row['cov_prob']:.1%}" if row["cov_prob"] else "—"
+                    st.markdown(
+                        f"<div style='text-align:center;padding:4px'>"
+                        f"<div style='color:#aaa;font-size:0.75rem'>WIN PROB ({row['pick']})</div>"
+                        f"<div style='font-size:0.9rem'>{win_pct}</div>"
+                        f"<div style='color:#aaa;font-size:0.75rem'>cov {cov_str}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with c5:
+                    tier_badge = f"{row['tier_emoji']} {row['tier_label']}"
+                    bet_str = f"${row['bet_size']:,}" if row["bet_size"] > 0 else "—"
+                    hk_str  = f"{row['hk_pct']*100:.1f}%" if row["hk_pct"] else "—"
+                    st.markdown(
+                        f"<div style='text-align:center;padding:6px 8px;background:{bg};"
+                        f"border-left:3px solid {accent};border-radius:6px'>"
+                        f"<div style='font-weight:bold;color:{accent}'>{tier_badge}</div>"
+                        f"<div style='font-size:0.85rem;color:#ddd'>Bet {row['pick']}</div>"
+                        f"<div style='font-size:0.9rem'>{bet_str}</div>"
+                        f"<div style='color:#aaa;font-size:0.75rem'>{hk_str} Kelly</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                if ou_str:
+                    st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
+                st.divider()
 
 # ── Errors ────────────────────────────────────────────────────────────────────
 if errors:
