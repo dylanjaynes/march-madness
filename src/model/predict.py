@@ -152,11 +152,11 @@ def project_game(team_a: str, team_b: str,
     if use_hybrid:
         seed_diff = seed_a - seed_b  # negative when team_a is better seed
 
-        # Check barthag_diff if available in feats
+        # Check barthag_diff if available in feats (feats is a Series)
         barthag_diff = None
-        if "barthag_diff" in feats.columns:
-            v = feats["barthag_diff"].values[0]
-            if not (v != v):  # NaN check
+        if "barthag_diff" in feats.index:
+            v = feats["barthag_diff"]
+            if v == v:  # NaN check (NaN != NaN)
                 barthag_diff = float(v)
 
         is_mismatch = abs(seed_diff) >= MISMATCH_SEED_DIFF_THRESHOLD

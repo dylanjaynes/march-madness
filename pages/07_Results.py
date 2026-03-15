@@ -4,8 +4,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
-from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
+from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, PROCESSED_DIR
 from src.utils.db import query_df, db_conn, upsert_df
 from src.model.predict import project_game
 
@@ -124,6 +125,19 @@ def _fetch_and_store_results(year: int) -> int:
 
 # ── Core data loader ───────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=120)
+def _load_backtest_predictions(year: int) -> pd.DataFrame:
+    """Load walk-forward (OOS) backtest predictions for a given year, if available."""
+    path = PROCESSED_DIR / "backtest_predictions.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    year_df = df[df["year"] == year].copy()
+    if "team_a" not in year_df.columns or year_df["team_a"].isna().all():
+        return pd.DataFrame()
+    return year_df.reset_index(drop=True)
+
+
 @st.cache_data(ttl=120, show_spinner="Grading games…")
 def load_graded_data(year: int) -> pd.DataFrame:
     """
@@ -137,6 +151,10 @@ def load_graded_data(year: int) -> pd.DataFrame:
       spread_edge      = model_spread − market_spread_a
         > 0 → model more bullish on team_a → bet team_a
         < 0 → model more bullish on team_b → bet team_b
+
+    For historical years (in backtest_predictions.csv): uses walk-forward OOS model
+    spreads to avoid data leakage from in-sample model evaluation.
+    For the current live year (not yet in backtest): falls back to project_game().
     """
     # ── 1. Completed game results ──────────────────────────────────────────────
     results = query_df(
@@ -159,7 +177,17 @@ def load_graded_data(year: int) -> pd.DataFrame:
         k = frozenset({str(lr["team1"]).lower(), str(lr["team2"]).lower()})
         lines_lookup[k] = lr
 
-    # ── 3. Grade each game ─────────────────────────────────────────────────────
+    # ── 3. OOS backtest predictions lookup (keyed by frozenset of team names) ──
+    bt_preds = _load_backtest_predictions(year)
+    bt_lookup = {}   # frozenset{team_a_lower, team_b_lower} → row
+    using_oos = not bt_preds.empty
+    if using_oos:
+        for _, br in bt_preds.iterrows():
+            if pd.notna(br.get("team_a")) and pd.notna(br.get("team_b")):
+                k = frozenset({str(br["team_a"]).lower(), str(br["team_b"]).lower()})
+                bt_lookup[k] = br
+
+    # ── 4. Grade each game ─────────────────────────────────────────────────────
     rows = []
     for _, g in results.iterrows():
         t1 = str(g["team1"])
@@ -172,48 +200,59 @@ def load_graded_data(year: int) -> pd.DataFrame:
         seed1 = int(g["seed1"]) if pd.notna(g.get("seed1")) else 8
         seed2 = int(g["seed2"]) if pd.notna(g.get("seed2")) else 8
 
-        # Project — pass seeds so team_a = lower seed, matching training convention
-        try:
-            proj = project_game(t1, t2, round_num=round_num, year=year,
-                                seed_a=seed1, seed_b=seed2)
-        except Exception:
-            proj = {"error": "model failed"}
-
-        if "error" in proj:
-            rows.append({
-                "game_date": g["game_date"],
-                "round_num": round_num,
-                "round_name": g.get("round_name") or ROUND_NAMES.get(round_num, "?"),
-                "team_a": t1, "team_b": t2,
-                "score_a": score1, "score_b": score2,
-                "actual_margin_a": score1 - score2,
-                "actual_total": score1 + score2,
-                "model_spread": None, "model_total": None,
-                "market_spread_a": None, "market_total": None,
-                "spread_edge": None, "total_edge": None,
-                "ats_result": "—", "ou_result": "—",
-                "has_line": False,
-            })
-            continue
-
-        team_a = proj["team_a"]   # canonical: lower-seed team (matches training)
-        team_b = proj["team_b"]
-        model_spread = round(proj["projected_spread"], 1)  # + = team_a wins
-        model_total  = round(proj["projected_total"], 1)
-
-        # Actual margin from team_a's perspective using raw scores (NOT margin column)
-        if t1.lower() == team_a.lower():
-            actual_margin_a = score1 - score2   # team_a=team1: a−b
-            score_a, score_b = score1, score2
-        else:
-            actual_margin_a = score2 - score1   # team_a=team2: a−b = score2−score1
+        # Determine canonical team_a (lower seed) — needed for sign convention
+        # even when using backtest predictions
+        if seed2 < seed1 or (seed2 == seed1 and t2 < t1):
+            team_a, team_b = t2, t1
             score_a, score_b = score2, score1
+        else:
+            team_a, team_b = t1, t2
+            score_a, score_b = score1, score2
 
+        actual_margin_a = score_a - score_b
         actual_total = score1 + score2
 
-        # Pre-game market line from team_a perspective
+        # ── Try OOS backtest spread first ──────────────────────────────────────
+        bt_row = bt_lookup.get(frozenset({t1.lower(), t2.lower()}))
+        if bt_row is not None and pd.notna(bt_row.get("model_spread")):
+            # Backtest team_a is already the lower seed (matches training convention)
+            # Flip sign if backtest team_a != our team_a (shouldn't happen, but guard)
+            bt_team_a = str(bt_row["team_a"]).lower()
+            bt_model_spread = float(bt_row["model_spread"])
+            if bt_team_a != team_a.lower():
+                bt_model_spread = -bt_model_spread
+            model_spread = round(bt_model_spread, 1)
+            model_total  = round(float(bt_row["model_total"]), 1) if pd.notna(bt_row.get("model_total")) else None
+        else:
+            # ── Fall back to live (in-sample) project_game() ──────────────────
+            try:
+                proj = project_game(t1, t2, round_num=round_num, year=year,
+                                    seed_a=seed1, seed_b=seed2)
+            except Exception:
+                proj = {"error": "model failed"}
+
+            if "error" in proj:
+                rows.append({
+                    "game_date": g["game_date"],
+                    "round_num": round_num,
+                    "round_name": g.get("round_name") or ROUND_NAMES.get(round_num, "?"),
+                    "team_a": team_a, "team_b": team_b,
+                    "score_a": int(score_a), "score_b": int(score_b),
+                    "actual_margin_a": actual_margin_a,
+                    "actual_total": actual_total,
+                    "model_spread": None, "model_total": None,
+                    "market_spread_a": None, "market_total": None,
+                    "spread_edge": None, "total_edge": None,
+                    "ats_result": "—", "ou_result": "—",
+                    "has_line": False, "is_oos": False,
+                })
+                continue
+
+            model_spread = round(proj["projected_spread"], 1)
+            model_total  = round(proj["projected_total"], 1)
+
+        # ── Pre-game market line from team_a perspective ───────────────────────
         # historical_lines.spread_line convention: positive = team1 favored
-        # We convert to team_a perspective (positive = team_a favored)
         lr = lines_lookup.get(frozenset({t1.lower(), t2.lower()}))
         market_spread_a = market_total = None
         if lr is not None and pd.notna(lr.get("spread_line")):
@@ -223,7 +262,7 @@ def load_graded_data(year: int) -> pd.DataFrame:
             market_total = float(lr["total_line"])
 
         spread_edge = round(model_spread - market_spread_a, 1) if market_spread_a is not None else None
-        total_edge  = round(model_total  - market_total,   1) if market_total    is not None else None
+        total_edge  = round(model_total  - market_total,   1) if (model_total is not None and market_total is not None) else None
 
         ats = _grade_ats(actual_margin_a, market_spread_a, spread_edge)
         ou  = _grade_ou(actual_total, market_total, total_edge)
@@ -247,6 +286,7 @@ def load_graded_data(year: int) -> pd.DataFrame:
             "ats_result":      ats,
             "ou_result":       ou,
             "has_line":        market_spread_a is not None,
+            "is_oos":          bt_row is not None and pd.notna(bt_row.get("model_spread")),
         })
 
     return pd.DataFrame(rows)
@@ -315,6 +355,23 @@ if n_in_db == 0:
         "Click **📥 Fetch results** in the sidebar after games are played."
     )
     st.stop()
+
+# ── OOS vs in-sample banner ────────────────────────────────────────────────────
+bt_check = _load_backtest_predictions(selected_year)
+if not bt_check.empty:
+    n_oos = bt_check["team_a"].notna().sum()
+    st.success(
+        f"✅ **Out-of-sample predictions** — model spreads for {selected_year} come from the "
+        f"walk-forward backtest (trained on {selected_year - 1} and earlier). "
+        f"No {selected_year} game data was seen during training."
+    )
+else:
+    st.warning(
+        f"⚠️ **In-sample predictions** — backtest predictions for {selected_year} are not available "
+        f"(run `python scripts/run_backtest.py` to generate them). "
+        f"Currently using the live model which was trained on all years including {selected_year}, "
+        f"so ATS statistics are **inflated** and not a valid forward-looking estimate."
+    )
 
 df = load_graded_data(selected_year)
 

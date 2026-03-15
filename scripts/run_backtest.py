@@ -168,7 +168,7 @@ print(f"\nResults saved   → {results_path}")
 
 # Save predictions CSV
 csv_cols = [
-    "year", "game_idx", "round_number", "is_mismatch",
+    "year", "game_idx", "team_a", "team_b", "round_number", "is_mismatch",
     "model_spread", "model_total",
     "market_spread", "market_total",
     "spread_edge", "total_edge",

@@ -276,6 +276,9 @@ def run_backtest(years: list = None) -> dict:
         ats_comp, ats_mis = [], []   # per-bucket ATS
         ou_all, ou_2, ou_3 = [], [], []
 
+        team_a_arr = df_test.loc[X_test_full.index, "team_a"].values if "team_a" in df_test.columns else np.full(len(X_test_full), "")
+        team_b_arr = df_test.loc[X_test_full.index, "team_b"].values if "team_b" in df_test.columns else np.full(len(X_test_full), "")
+
         for j in range(len(X_test_full)):
             model_spread = pred_spread[j]
             model_total = pred_total[j]
@@ -340,6 +343,8 @@ def run_backtest(years: list = None) -> dict:
             all_predictions.append({
                 "year": test_year,
                 "game_idx": j,
+                "team_a": team_a_arr[j] if j < len(team_a_arr) else "",
+                "team_b": team_b_arr[j] if j < len(team_b_arr) else "",
                 "round_number": round_nums[j] if j < len(round_nums) else None,
                 "is_mismatch": is_mis_game,
                 "model_spread": model_spread,
