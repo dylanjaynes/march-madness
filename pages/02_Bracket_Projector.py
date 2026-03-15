@@ -242,9 +242,9 @@ run_btn = st.button("🏀 Simulate Tournament", type="primary", use_container_wi
 
 # ── Bracket HTML visualization ─────────────────────────────────────────────────
 _SLOT_H = 24
-_SLOT_W = 142
+_SLOT_W = 120    # narrower to fit ~1280px laptop screens
 _GAME_GAP = 3
-_CONN_W = 20
+_CONN_W = 14     # tighter connectors
 _LABEL_H = 16
 _R64_GAME_H = 60  # height per R64 game slot
 
@@ -254,14 +254,16 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool) -> str:
     bord = "#2d5a87" if is_winner else "#1a2535"
     tc   = "#ddeeff" if is_winner else "#7799aa"
     pc   = "#5aadff" if is_winner else "#3a6a8f"
-    nm   = (team[:14] + "…") if len(team) > 15 else team
+    nm   = (team[:12] + "…") if len(team) > 13 else team
+    # prob = model win probability for THIS matchup (not cumulative advancement)
     return (
         f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;'
-        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
-        f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
-        f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
-        f'white-space:nowrap;padding:0 4px;">{nm}</span>'
-        f'<span style="font-size:10px;color:{pc};min-width:36px;text-align:right;">{prob:.1f}%</span>'
+        f'padding:0 4px;background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<span style="font-size:10px;color:#445;min-width:13px;font-weight:700;">{seed}</span>'
+        f'<span style="flex:1;font-size:10px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
+        f'white-space:nowrap;padding:0 3px;">{nm}</span>'
+        f'<span style="font-size:10px;color:{pc};min-width:32px;text-align:right;" '
+        f'title="Win probability for this matchup">{prob:.0f}%</span>'
         f'</div>'
     )
 
@@ -445,15 +447,18 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
                   f'<div style="height:8px;"></div>'
                   f'{_b_region(west,     "West",    flip=True)}</div>')
 
+    # Left-aligned (not centered) so horizontal overflow is only to the right,
+    # making the bracket scrollable from R64 → Final Four on narrow screens.
     bracket_row = (
-        f'<div style="display:flex;align-items:center;justify-content:center;">'
+        f'<div style="display:inline-flex;align-items:center;">'
         f'{left_html}{center_html}{right_html}'
         f'</div>'
     )
 
     return (
         '<!DOCTYPE html><html><body style="margin:0;padding:8px;'
-        'background:#080e17;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">'
+        'background:#080e17;font-family:-apple-system,BlinkMacSystemFont,sans-serif;'
+        'overflow-x:auto;white-space:nowrap;">'
         + bracket_row +
         '</body></html>'
     )
@@ -807,6 +812,7 @@ if run_btn:
 
     # ── Render visual bracket ─────────────────────────────────────────────────
     st.subheader("Projected Bracket")
+    st.caption("% shown = model win probability for that specific matchup · scroll right to see full bracket")
     import streamlit.components.v1 as components
     components.html(bracket_html, height=1150, scrolling=True)
 
