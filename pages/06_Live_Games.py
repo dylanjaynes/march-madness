@@ -11,6 +11,7 @@ from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly,
     bet_tier, season_label, data_as_of,
 )
+from src.utils.db import db_conn, query_df
 
 
 st.set_page_config(page_title="Live Games", page_icon="📡", layout="wide")
@@ -53,20 +54,97 @@ with st.sidebar:
     )
 
 
-# ── Fetch & cache odds ────────────────────────────────────────────────────────
+# ── Odds: fetch, store pre-game snapshots, load pregame reference ──────────────
 @st.cache_data(ttl=120)
 def fetch_live_odds():
     from src.ingest.odds import fetch_current_games
     return fetch_current_games()
 
 
+def _store_pregame_snapshot(odds_df: pd.DataFrame) -> None:
+    """
+    Persist current lines to odds_history for games that haven't tipped yet.
+    This builds a pre-game line archive that survives page refreshes.
+    Uses INSERT OR IGNORE so the *first* snapshot for each (game_id, timestamp)
+    is preserved, giving us a true opening-line reference.
+    """
+    if odds_df.empty:
+        return
+    now_utc = datetime.now(timezone.utc)
+    ts = now_utc.isoformat()
+    try:
+        with db_conn() as conn:
+            for _, g in odds_df.iterrows():
+                commence = str(g.get("commence_time", ""))
+                try:
+                    dt = datetime.fromisoformat(commence.replace("Z", "+00:00"))
+                    if dt <= now_utc:
+                        continue  # game already started — don't overwrite pre-game line
+                except Exception:
+                    pass
+                conn.execute(
+                    """INSERT OR IGNORE INTO odds_history
+                       (game_id, pull_timestamp, home_team, away_team, commence_time,
+                        spread_home, spread_away, total_line, bookmaker, is_opening)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        g.get("game_id", ""),
+                        ts,
+                        g.get("home_team", ""),
+                        g.get("away_team", ""),
+                        commence,
+                        g.get("spread_home"),
+                        g.get("spread_away"),
+                        g.get("total_line"),
+                        g.get("bookmaker", ""),
+                        False,
+                    ],
+                )
+    except Exception:
+        pass  # don't crash the page if storage fails
+
+
+@st.cache_data(ttl=300)
+def load_pregame_reference(game_ids: tuple) -> dict:
+    """
+    Return the earliest stored line for each game_id from odds_history.
+    This is the pre-game snapshot that was locked in before tipoff.
+    Returns dict: game_id → {spread_home, spread_away, total_line}
+    """
+    if not game_ids:
+        return {}
+    try:
+        ph = ",".join("?" * len(game_ids))
+        df = query_df(
+            f"""SELECT oh.game_id,
+                       oh.spread_home AS pg_spread_home,
+                       oh.spread_away AS pg_spread_away,
+                       oh.total_line  AS pg_total
+                FROM odds_history oh
+                INNER JOIN (
+                    SELECT game_id, MIN(pull_timestamp) AS min_ts
+                    FROM odds_history
+                    WHERE game_id IN ({ph})
+                    GROUP BY game_id
+                ) earliest
+                  ON oh.game_id = earliest.game_id
+                 AND oh.pull_timestamp = earliest.min_ts""",
+            params=list(game_ids),
+        )
+        return {row["game_id"]: row.to_dict() for _, row in df.iterrows()} if not df.empty else {}
+    except Exception:
+        return {}
+
+
 # ── Project all games ─────────────────────────────────────────────────────────
 @st.cache_data(ttl=120)
-def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
+def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
+                      pregame_ref: dict = None):
     odds_df = fetch_live_odds()
     if odds_df.empty:
         return pd.DataFrame(), []
 
+    pregame_ref = pregame_ref or {}
     rows, errors = [], []
     now_utc = datetime.now(timezone.utc)
 
@@ -76,6 +154,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
         mkt_spread_home = game.get("spread_home")
         mkt_total = game.get("total_line")
         commence = str(game.get("commence_time", ""))
+        game_id = game.get("game_id", "")
 
         # Parse tip-off time
         try:
@@ -105,16 +184,42 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
         score_a = proj["projected_score_a"]
         score_b = proj["projected_score_b"]
 
-        # Market spread → model convention (+ = team_a favored)
-        if mkt_spread_home is not None:
-            msh = float(mkt_spread_home)
-            mkt_spread_ta = -msh if (ta.lower() == home.lower()) else msh
-            spread_edge = model_spread - mkt_spread_ta   # + = team_a has edge, − = team_b has edge
-        else:
-            mkt_spread_ta = None
-            spread_edge = None
+        # ── Pre-game reference line (earliest stored snapshot before tipoff) ──
+        pg = pregame_ref.get(game_id, {})
+        pg_spread_home = pg.get("pg_spread_home")
+        pg_total       = pg.get("pg_total")
 
-        total_edge = (model_total - float(mkt_total)) if mkt_total is not None else None
+        def _spread_to_ta(spread_h):
+            """Convert home-team spread to team_a convention (+ = ta favored)."""
+            if spread_h is None:
+                return None
+            sh = float(spread_h)
+            return -sh if (ta.lower() == home.lower()) else sh
+
+        # Live market spread (current refresh)
+        live_spread_ta  = _spread_to_ta(mkt_spread_home)
+        live_total      = float(mkt_total) if mkt_total is not None else None
+
+        # Pre-game line (falls back to live if no history yet)
+        pregame_spread_ta = _spread_to_ta(pg_spread_home) if pg_spread_home is not None else live_spread_ta
+        pregame_total     = float(pg_total) if pg_total is not None else live_total
+
+        # Edge is always vs the PRE-GAME line (what you actually bet at)
+        mkt_spread_ta = pregame_spread_ta   # used for edge / sizing calcs
+        spread_edge = (model_spread - pregame_spread_ta) if pregame_spread_ta is not None else None
+        total_edge  = (model_total - pregame_total)      if pregame_total    is not None else None
+
+        # Did the live line move vs pre-game? (show alert if ≥ 0.5 pt)
+        line_moved = (
+            live_spread_ta is not None
+            and pregame_spread_ta is not None
+            and abs(live_spread_ta - pregame_spread_ta) >= 0.5
+        )
+        total_moved = (
+            live_total is not None
+            and pregame_total is not None
+            and abs(live_total - pregame_total) >= 0.5
+        )
 
         # ── Determine model's pick & flip display perspective ─────────────────
         # coverage_probability() already returns P(model's preferred side covers)
@@ -176,12 +281,13 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
             "date_label":  date_label,
             "days_out":    days_out,
             "time":        time_label,
+            "game_started": days_out < 0,
             # canonical teams (for reference)
             "team_a": ta, "team_b": tb,
             # pick-perspective display fields
             "pick":        pick,
             "opp":         opp,
-            "matchup":     f"{ta} vs {tb}",          # always home-like vs away-like
+            "matchup":     f"{ta} vs {tb}",
             "pick_matchup": f"{pick} vs {opp}",
             "pick_model_display": pick_model_display,
             "pick_mkt_display":   pick_mkt_display,
@@ -191,7 +297,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
             "opp_score":   opp_score,
             # model
             "model_spread":  model_spread,
-            "mkt_spread_ta": mkt_spread_ta,
+            "mkt_spread_ta": mkt_spread_ta,        # = pregame line
             "spread_edge":   spread_edge,
             "abs_edge":      abs_edge,
             "cov_prob":      cov_prob,
@@ -200,10 +306,17 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str):
             "tier_label":    tier_label,
             "tier_emoji":    tier_emoji,
             "tier_order":    tier_order,
+            # live vs pregame line tracking
+            "pregame_spread_ta": pregame_spread_ta,
+            "live_spread_ta":    live_spread_ta,
+            "line_moved":        line_moved,
             # total
-            "model_total":   round(model_total, 1),
-            "mkt_total":     mkt_total,
-            "total_edge":    total_edge,
+            "model_total":    round(model_total, 1),
+            "pregame_total":  pregame_total,
+            "live_total":     live_total,
+            "mkt_total":      pregame_total,  # keep backward compat
+            "total_edge":     total_edge,
+            "total_moved":    total_moved,
         })
 
     return pd.DataFrame(rows), errors
@@ -224,7 +337,16 @@ with hcol2:
         st.rerun()
 
 with st.spinner("Loading games..."):
-    df, errors = build_projections(round_context, current_year, bankroll, sizing)
+    # 1. Fetch live odds (cached 2 min)
+    _live_df = fetch_live_odds()
+    # 2. Store pre-game snapshots for upcoming games (runs every refresh, outside cache)
+    _store_pregame_snapshot(_live_df)
+    # 3. Load earliest stored line per game as pre-game reference
+    _game_ids = tuple(_live_df["game_id"].tolist()) if not _live_df.empty else ()
+    _pregame_ref = load_pregame_reference(_game_ids)
+    # 4. Build full projections (cached 2 min)
+    df, errors = build_projections(round_context, current_year, bankroll, sizing,
+                                   pregame_ref=_pregame_ref)
 
 if df.empty:
     st.warning("No upcoming NCAAB games found.")
@@ -277,7 +399,7 @@ if not best.empty:
                 <div style='display:flex;justify-content:space-between'>
                   <div><div style='color:#aaa;font-size:0.75rem'>MODEL</div>
                        <div style='font-size:1rem;font-weight:bold; color: rgb(255, 255, 255);'>{model_str}</div></div>
-                  <div><div style='color:#aaa;font-size:0.75rem'>MARKET</div>
+                  <div><div style='color:#aaa;font-size:0.75rem'>PRE-GAME LINE</div>
                        <div style='font-size:1rem; color: rgb(255, 255, 255);'>{mkt_str}</div></div>
                   <div><div style='color:#aaa;font-size:0.75rem'>EDGE</div>
                        <div style='font-size:1rem;font-weight:bold;color:#2ecc71'>+{b['abs_edge']:.1f} pts</div></div>
@@ -356,11 +478,43 @@ for date, tab in zip(dates, date_tabs):
                     unsafe_allow_html=True,
                 )
             with c3:
+                # Build market/line display: always anchor to pre-game line
+                # Show live line separately if it has moved ≥ 0.5 pts
+                pg_display = (
+                    f"{row['pick']} {row['pick_mkt_display']:+.1f}"
+                    if row["pick_mkt_display"] is not None else "—"
+                )
+                if row.get("line_moved") and row.get("live_spread_ta") is not None:
+                    # Live line has moved — show both
+                    live_ta = row["live_spread_ta"]
+                    if row["pick"] == row["team_a"]:
+                        live_display = f"{row['pick']} {-live_ta:+.1f}"
+                    else:
+                        live_display = f"{row['pick']} {live_ta:+.1f}"
+                    line_move_dir = "▲" if (live_ta > (row.get("pregame_spread_ta") or live_ta)) else "▼"
+                    mkt_html = (
+                        f"<div style='font-size:0.75rem;color:#aaa'>OPEN</div>"
+                        f"<div style='font-size:0.95rem;font-weight:600'>{pg_display}</div>"
+                        f"<div style='font-size:0.7rem;color:#f39c12'>LIVE {live_display} {line_move_dir}</div>"
+                    )
+                else:
+                    # No movement — label clearly as pre-game
+                    pg_label = "PRE-GAME" if not row.get("game_started") else "OPEN LINE"
+                    mkt_html = (
+                        f"<div style='font-size:0.75rem;color:#aaa'>{pg_label}</div>"
+                        f"<div style='font-size:0.95rem'>{pg_display}</div>"
+                        f"<div style='font-size:0.75rem;color:#aaa'>&nbsp;</div>"
+                    )
+                # Total line movement note
+                if row.get("total_moved") and row.get("live_total") is not None:
+                    total_note = f"<div style='font-size:0.7rem;color:#f39c12'>O/U open {row['pregame_total']} → live {row['live_total']}</div>"
+                else:
+                    total_note = ""
                 st.markdown(
                     f"<div style='text-align:center;padding:4px'>"
-                    f"<div style='color:#aaa;font-size:0.75rem'>MARKET / EDGE</div>"
-                    f"<div style='font-size:0.95rem'>{mkt_str}</div>"
-                    f"<div style='color:{accent};font-weight:bold'>{edge_str} pts</div>"
+                    f"{mkt_html}"
+                    f"<div style='color:{accent};font-weight:bold;margin-top:2px'>{edge_str} pts edge</div>"
+                    f"{total_note}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
