@@ -200,13 +200,235 @@ for region, tab in zip(REGIONS, tabs):
 st.divider()
 
 # ── Simulation settings ────────────────────────────────────────────────────────
-col_sim1, col_sim2 = st.columns([1, 3])
+col_sim1, col_sim2, col_sim3 = st.columns([1, 2, 1])
 with col_sim1:
-    n_sims = st.selectbox("Monte Carlo simulations", [1000, 5000, 10000], index=0)
+    n_sims = st.selectbox("Simulations", [1000, 5000, 10000], index=0)
 with col_sim2:
-    st.caption("Win probabilities are pre-computed once, so simulations run instantly regardless of count.")
+    chaos = st.slider("🌪️ Chaos Meter", 0, 100, 0,
+                      help="0 = pure model predictions · 100 = pure coin flip")
+with col_sim3:
+    st.metric("Chaos", f"{chaos}%", delta=None)
 
-run_btn = st.button("🔢 Project Bracket", type="primary", use_container_width=True)
+run_btn = st.button("🏀 Simulate Tournament", type="primary", use_container_width=True)
+
+
+# ── Bracket HTML visualization ─────────────────────────────────────────────────
+_SLOT_H = 24
+_SLOT_W = 142
+_GAME_GAP = 3
+_CONN_W = 20
+_LABEL_H = 16
+_R64_GAME_H = 60  # height per R64 game slot
+
+
+def _b_slot(team: str, seed: int, prob: float, is_winner: bool) -> str:
+    bg   = "#1b2e40" if is_winner else "#0f1925"
+    bord = "#2d5a87" if is_winner else "#1a2535"
+    tc   = "#ddeeff" if is_winner else "#7799aa"
+    pc   = "#5aadff" if is_winner else "#3a6a8f"
+    nm   = (team[:14] + "…") if len(team) > 15 else team
+    return (
+        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;'
+        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
+        f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
+        f'white-space:nowrap;padding:0 4px;">{nm}</span>'
+        f'<span style="font-size:10px;color:{pc};min-width:36px;text-align:right;">{prob:.1f}%</span>'
+        f'</div>'
+    )
+
+
+def _b_round_col(games: list, game_h: float, label: str) -> str:
+    lh = f'<div style="height:{_LABEL_H}px;font-size:9px;color:#445;text-align:center;letter-spacing:.4px;text-transform:uppercase;display:flex;align-items:center;justify-content:center;">{label}</div>'
+    col = f'<div style="display:flex;flex-direction:column;width:{_SLOT_W}px;">{lh}'
+    for g in games:
+        inner = 2 * _SLOT_H + _GAME_GAP
+        pad   = max(0, (game_h - inner) / 2)
+        col  += (f'<div style="height:{game_h:.1f}px;display:flex;flex-direction:column;justify-content:center;">'
+                 f'<div style="padding:{pad:.1f}px 0;">'
+                 + _b_slot(g['a']['team'], g['a']['seed'], g['a']['prob'], g.get('winner') == 'a')
+                 + f'<div style="height:{_GAME_GAP}px;"></div>'
+                 + _b_slot(g['b']['team'], g['b']['seed'], g['b']['prob'], g.get('winner') == 'b')
+                 + '</div></div>')
+    col += '</div>'
+    return col
+
+
+def _b_conn_ltr(n_left: int, left_game_h: float) -> str:
+    """LTR connector: n_left games → n_left/2 games."""
+    total_h = n_left * left_game_h + _LABEL_H
+    lines = []
+    xm = _CONN_W // 2
+    for i in range(n_left // 2):
+        y1 = _LABEL_H + (2*i)   * left_game_h + left_game_h / 2
+        y2 = _LABEL_H + (2*i+1) * left_game_h + left_game_h / 2
+        ym = (y1 + y2) / 2
+        lines += [
+            f'<line x1="0" y1="{y1:.1f}" x2="{xm}" y2="{y1:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="0" y1="{y2:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="{xm}" y1="{y1:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="{xm}" y1="{ym:.1f}" x2="{_CONN_W}" y2="{ym:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+        ]
+    return f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;overflow:visible;">{"".join(lines)}</svg>'
+
+
+def _b_conn_rtl(n_right: int, right_game_h: float) -> str:
+    """RTL connector: n_right/2 games (left) → n_right games (right)."""
+    left_game_h = right_game_h * 2
+    n_left = n_right // 2
+    total_h = n_left * left_game_h + _LABEL_H
+    lines = []
+    xm = _CONN_W // 2
+    for i in range(n_left):
+        y_l = _LABEL_H + i * left_game_h + left_game_h / 2
+        yr1 = _LABEL_H + (2*i)   * right_game_h + right_game_h / 2
+        yr2 = _LABEL_H + (2*i+1) * right_game_h + right_game_h / 2
+        lines += [
+            f'<line x1="0" y1="{y_l:.1f}" x2="{xm}" y2="{y_l:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{_CONN_W}" y2="{yr1:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="{xm}" y1="{yr2:.1f}" x2="{_CONN_W}" y2="{yr2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{xm}" y2="{yr2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+        ]
+    return f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;overflow:visible;">{"".join(lines)}</svg>'
+
+
+def _b_region(rounds_data: list, name: str, flip: bool = False) -> str:
+    """
+    4 rounds: [R64_games, R32_games, S16_games, E8_games]
+    flip=True for right-side regions (display order reversed: E8→S16→R32→R64)
+    """
+    labels = ['R64', 'R32', 'S16', 'E8']
+    items  = [(rounds_data[ri], _R64_GAME_H * (2**ri), labels[ri]) for ri in range(4)]
+    if flip:
+        items = list(reversed(items))
+
+    rlabel = (f'<div style="font-size:10px;font-weight:700;color:#5588aa;'
+              f'text-align:center;padding:3px 0;letter-spacing:1px;'
+              f'text-transform:uppercase;">{name}</div>')
+    row = f'<div>{rlabel}<div style="display:flex;align-items:flex-start;">'
+
+    for idx, (gms, gh, lbl) in enumerate(items):
+        row += _b_round_col(gms, gh, lbl)
+        if idx < len(items) - 1:
+            if not flip:
+                row += _b_conn_ltr(len(gms), gh)
+            else:
+                next_n = len(items[idx+1][0])
+                next_gh = items[idx+1][1]
+                row += _b_conn_rtl(next_n, next_gh)
+
+    row += '</div></div>'
+    return row
+
+
+def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool, width: int = 150) -> str:
+    bg   = "#1b2e40" if is_winner else "#0f1925"
+    bord = "#2d5a87" if is_winner else "#1a2535"
+    tc   = "#ddeeff" if is_winner else "#7799aa"
+    pc   = "#5aadff"
+    nm   = (team[:16] + "…") if len(team) > 17 else team
+    return (
+        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;width:{width}px;'
+        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
+        f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
+        f'white-space:nowrap;padding:0 4px;">{nm}</span>'
+        f'<span style="font-size:10px;color:{pc};min-width:34px;text-align:right;">{prob:.1f}%</span>'
+        f'</div>'
+    )
+
+
+def _build_bracket_vis(region_all_rounds: dict) -> dict:
+    """Convert simulation results to bracket_vis structure for HTML rendering."""
+    vis = {}
+    for region, all_rounds in region_all_rounds.items():
+        rounds_data = []
+        for ri in range(min(4, len(all_rounds) - 1)):
+            teams = all_rounds[ri]
+            games = []
+            next_teams = [t for t, s in all_rounds[ri + 1]] if ri + 1 < len(all_rounds) else []
+            for gi in range(len(teams) // 2):
+                ta, sa = teams[gi * 2]
+                tb, sb = teams[gi * 2 + 1]
+                wp_a = _wp_cache.get((ta, tb), 1.0 - _wp_cache.get((tb, ta), 0.5))
+                winner = 'a' if ta in next_teams else 'b'
+                games.append({
+                    'a': {'team': ta, 'seed': sa, 'prob': wp_a * 100},
+                    'b': {'team': tb, 'seed': sb, 'prob': (1 - wp_a) * 100},
+                    'winner': winner,
+                })
+            rounds_data.append(games)
+        vis[region] = rounds_data
+    return vis
+
+
+def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
+                              champion_counts: dict, n_sims: int) -> str:
+    """Build the complete bracket HTML string."""
+    # F4 / Championship center column
+    cw = 155  # center slot width
+    f4_h = _R64_GAME_H * 16  # total height of one region pair (East+Midwest)
+
+    def _f4_game_html(game_dict, region_label):
+        a, b = game_dict['a'], game_dict['b']
+        w = game_dict.get('winner', 'a')
+        return (
+            f'<div style="margin:4px 0;">'
+            f'<div style="font-size:9px;color:#445;text-align:center;letter-spacing:.4px;'
+            f'text-transform:uppercase;padding-bottom:2px;">{region_label}</div>'
+            + _b_center_slot(a['team'], a['seed'], a['prob'], w == 'a', cw)
+            + f'<div style="height:{_GAME_GAP}px;"></div>'
+            + _b_center_slot(b['team'], b['seed'], b['prob'], w == 'b', cw)
+            + '</div>'
+        )
+
+    champ_name, champ_seed = champion
+    champ_pct = champion_counts.get(champ_name, 0) / n_sims * 100 if n_sims else 0
+
+    center_html = (
+        f'<div style="display:flex;flex-direction:column;align-items:center;'
+        f'justify-content:center;width:{cw + 20}px;padding-top:{_LABEL_H}px;">'
+    )
+    if len(f4_games) >= 2:
+        center_html += _f4_game_html(f4_games[0], 'Final Four')
+    center_html += (
+        f'<div style="margin:8px 0;text-align:center;">'
+        f'<div style="font-size:9px;color:#445;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;">Championship</div>'
+        f'<div style="background:#1a3045;border:1px solid #2d5a87;border-radius:4px;padding:6px 10px;min-width:{cw}px;">'
+        f'<div style="font-size:13px;font-weight:700;color:#ffd700;">🏆 {champ_name}</div>'
+        f'<div style="font-size:10px;color:#5aadff;">#{champ_seed} seed · {champ_pct:.1f}%</div>'
+        f'</div></div>'
+    )
+    if len(f4_games) >= 3:
+        center_html += _f4_game_html(f4_games[2], 'Final Four')
+    elif len(f4_games) >= 2:
+        center_html += _f4_game_html(f4_games[1], 'Final Four')
+    center_html += '</div>'
+
+    east_mw  = bracket_vis.get('East',    [[]] * 4)
+    west_mw  = bracket_vis.get('Midwest', [[]] * 4)
+    south    = bracket_vis.get('South',   [[]] * 4)
+    west     = bracket_vis.get('West',    [[]] * 4)
+
+    left_html  = (f'<div>{_b_region(east_mw,  "East",    flip=False)}'
+                  f'<div style="height:8px;"></div>'
+                  f'{_b_region(west_mw,  "Midwest", flip=False)}</div>')
+    right_html = (f'<div>{_b_region(south,     "South",   flip=True)}'
+                  f'<div style="height:8px;"></div>'
+                  f'{_b_region(west,     "West",    flip=True)}</div>')
+
+    bracket_row = (
+        f'<div style="display:flex;align-items:center;justify-content:center;">'
+        f'{left_html}{center_html}{right_html}'
+        f'</div>'
+    )
+
+    return (
+        '<!DOCTYPE html><html><body style="margin:0;padding:8px;'
+        'background:#080e17;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">'
+        + bracket_row +
+        '</body></html>'
+    )
 
 
 # ── Simulation helpers ─────────────────────────────────────────────────────────
@@ -214,22 +436,30 @@ run_btn = st.button("🔢 Project Bracket", type="primary", use_container_width=
 _wp_cache: dict = {}
 
 def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
-                  use_cache: bool = False) -> float:
+                  use_cache: bool = False, chaos: int = 0) -> float:
     """
     Return win prob for ta (better seed = lower number).
     use_cache=True: fast path for Monte Carlo — reads from pre-computed cache.
     use_cache=False: calls model directly with correct round_num (used for display).
+    chaos: 0 = pure model, 100 = coin flip. Interpolates between model and 0.5.
     """
     if use_cache:
         # Cache is keyed (ta, tb) regardless of round — uses round 3 as proxy
         key = (ta, tb)
         if key in _wp_cache:
-            return _wp_cache[key]
-        rev = (tb, ta)
-        if rev in _wp_cache:
-            return 1.0 - _wp_cache[rev]
-    proj = project_game(ta, tb, round_num=round_num, year=current_year, seed_a=sa, seed_b=sb)
-    return 0.5 if "error" in proj else proj.get("win_prob_a", 0.5)
+            raw_wp = _wp_cache[key]
+        elif (tb, ta) in _wp_cache:
+            raw_wp = 1.0 - _wp_cache[(tb, ta)]
+        else:
+            raw_wp = 0.5
+    else:
+        proj = project_game(ta, tb, round_num=round_num, year=current_year, seed_a=sa, seed_b=sb)
+        raw_wp = 0.5 if "error" in proj else proj.get("win_prob_a", 0.5)
+
+    if chaos > 0:
+        alpha = chaos / 100.0
+        raw_wp = alpha * 0.5 + (1 - alpha) * raw_wp
+    return raw_wp
 
 
 def _precompute_win_probs(seed_teams_by_region: dict) -> None:
@@ -329,7 +559,7 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
 
 
 def simulate_region(seed_team: dict, deterministic: bool = True,
-                    use_cache: bool = False) -> list:
+                    use_cache: bool = False, chaos: int = 0) -> list:
     """
     Simulate a 16-team region using standard NCAA bracket structure.
     seed_team: {seed: team_name}
@@ -362,7 +592,7 @@ def simulate_region(seed_team: dict, deterministic: bool = True,
                 fav, fs, dog, ds = tb, sb, ta, sa
 
             win_prob_fav = _get_win_prob(fav, fs, dog, ds, round_num,
-                                          use_cache=use_cache)
+                                          use_cache=use_cache, chaos=chaos)
 
             if deterministic:
                 winner = (fav, fs) if win_prob_fav >= 0.5 else (dog, ds)
@@ -412,7 +642,7 @@ def _project_game_row(ta, sa, tb, sb, round_num, label, round_name):
 
 
 def simulate_final_four(region_winners: dict, deterministic: bool = True,
-                        use_cache: bool = False):
+                        use_cache: bool = False, chaos: int = 0):
     """East vs West, South vs Midwest in F4."""
     matchups = [
         (region_winners["East"], region_winners["West"], "East vs West"),
@@ -431,7 +661,7 @@ def simulate_final_four(region_winners: dict, deterministic: bool = True,
             # Fast path: use cached win prob, skip display row generation
             fav_t, fav_s = (t_a, s_a) if s_a <= s_b else (t_b, s_b)
             dog_t, dog_s = (t_b, s_b) if s_a <= s_b else (t_a, s_a)
-            wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 5, use_cache=True)
+            wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 5, use_cache=True, chaos=chaos)
             winner = (fav_t, fav_s) if np.random.random() < wp_a else (dog_t, dog_s)
             f4_winners.append(winner)
             continue
@@ -457,7 +687,7 @@ def simulate_final_four(region_winners: dict, deterministic: bool = True,
     if use_cache:
         fav_t, fav_s = (t_a, s_a) if s_a <= s_b else (t_b, s_b)
         dog_t, dog_s = (t_b, s_b) if s_a <= s_b else (t_a, s_a)
-        wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 6, use_cache=True)
+        wp_a = _get_win_prob(fav_t, fav_s, dog_t, dog_s, 6, use_cache=True, chaos=chaos)
         champ = (fav_t, fav_s) if np.random.random() < wp_a else (dog_t, dog_s)
         return games, champ
 
@@ -493,7 +723,7 @@ if run_btn:
     region_winners_det: dict = {}
     for region in REGIONS:
         region_all_rounds[region] = simulate_region(
-            region_seed_team[region], deterministic=True, use_cache=True
+            region_seed_team[region], deterministic=True, use_cache=True, chaos=chaos
         )
         region_winners_det[region] = region_all_rounds[region][-1][0]
 
@@ -504,93 +734,89 @@ if run_btn:
         sim_winners = {}
         for region in REGIONS:
             sim_rounds = simulate_region(
-                region_seed_team[region], deterministic=False, use_cache=True
+                region_seed_team[region], deterministic=False, use_cache=True, chaos=chaos
             )
             sim_winners[region] = sim_rounds[-1][0]
             for ri, survivors in enumerate(sim_rounds[1:], 2):
                 for team, seed in survivors:
                     round_adv[team][ri] += 1
         _, sim_champ = simulate_final_four(
-            sim_winners, deterministic=False, use_cache=True
+            sim_winners, deterministic=False, use_cache=True, chaos=chaos
         )
         champion_counts[sim_champ[0]] += 1
 
-    # ── Display: bracket tabs ──────────────────────────────────────────────────
+    # ── Build bracket visualization ────────────────────────────────────────────
+    bracket_vis = _build_bracket_vis(region_all_rounds)
+
+    # Build F4 games data for center display
+    f4_display_games = []
+    for region_pair in [('East', 'West'), ('South', 'Midwest')]:
+        ra, rb = region_pair
+        ta, sa = region_winners_det[ra]
+        tb, sb = region_winners_det[rb]
+        if sa <= sb:
+            fav, fs, dog, ds = ta, sa, tb, sb
+        else:
+            fav, fs, dog, ds = tb, sb, ta, sa
+        wp = _wp_cache.get((fav, dog), 0.5)
+        if chaos > 0:
+            wp = (chaos/100)*0.5 + (1 - chaos/100)*wp
+        f4_display_games.append({
+            'a': {'team': fav, 'seed': fs, 'prob': wp * 100},
+            'b': {'team': dog, 'seed': ds, 'prob': (1-wp) * 100},
+            'winner': 'a' if wp >= 0.5 else 'b',
+        })
+
+    # Championship game
+    _, champ_candidate = simulate_final_four(region_winners_det, deterministic=True, chaos=chaos)
+
+    bracket_html = _build_full_bracket_html(
+        bracket_vis, f4_display_games, champ_candidate,
+        champion_counts, n_sims,
+    )
+
+    # ── Render visual bracket ─────────────────────────────────────────────────
     st.subheader("Projected Bracket")
-    result_tabs = st.tabs(REGIONS + ["🏆 Final Four"])
-    round_labels = {1: "R64 → R32", 2: "R32 → S16", 3: "S16 → E8", 4: "Elite Eight"}
-
-    for region, rtab in zip(REGIONS, result_tabs[:4]):
-        with rtab:
-            all_rounds = region_all_rounds[region]
-            for ri in range(1, len(all_rounds)):
-                label = round_labels.get(ri, f"Round {ri}")
-                st.markdown(f"#### {label}")
-                survivors = all_rounds[ri]
-                prev = all_rounds[ri - 1]
-                prev_per_winner = len(prev) // len(survivors)
-                cols = st.columns(len(survivors))
-                for ci, (team, seed) in enumerate(survivors):
-                    with cols[ci]:
-                        start = ci * prev_per_winner
-                        prev_slot = prev[start: start + prev_per_winner]
-                        opp = next((t for t, s in prev_slot if t != team), "?")
-                        opp_seed = next((s for t, s in prev_slot if t != team), "?")
-                        st.success(f"**#{seed} {team}**\ndef. #{opp_seed} {opp}")
-                st.markdown("")
-
-            winner, wseed = region_winners_det[region]
-            st.markdown(f"### 🏆 {region} Winner: **#{wseed} {winner}**")
-
-    with result_tabs[4]:
-        st.subheader("Final Four & Championship")
-        # Final Four display calls project_game directly for spreads/win probs
-        f4_games, champion = simulate_final_four(region_winners_det, deterministic=True)
-        f4_df = pd.DataFrame(f4_games)[["Round", "Matchup", "Model Pick", "Opponent", "Pick Win Prob", "Model Spread", "Winner"]]
-        st.dataframe(f4_df, use_container_width=True, hide_index=True)
-        st.caption("**Model Pick** = team the model projects to win. **Pick Win Prob** = that team's win probability. **Model Spread** = projected margin in betting convention (negative = pick is favored).")
-        st.markdown(f"## 🏆 National Champion: **{champion[0]}** (#{champion[1]} seed)")
+    import streamlit.components.v1 as components
+    components.html(bracket_html, height=1050, scrolling=False)
 
     st.divider()
 
-    # ── Display: Monte Carlo results ───────────────────────────────────────────
-    st.subheader(f"Monte Carlo Probabilities ({n_sims:,} simulations)")
+    # ── Monte Carlo summary (collapsible) ─────────────────────────────────────
+    with st.expander(f"📊 Monte Carlo Results ({n_sims:,} simulations)", expanded=False):
+        champ_df = pd.DataFrame([
+            {"Team": t, "Champion %": round(c / n_sims * 100, 1)}
+            for t, c in sorted(champion_counts.items(), key=lambda x: -x[1]) if c > 0
+        ]).head(20)
 
-    champ_df = pd.DataFrame([
-        {"Team": t, "Champion %": round(c / n_sims * 100, 1)}
-        for t, c in sorted(champion_counts.items(), key=lambda x: -x[1]) if c > 0
-    ]).head(20)
+        if not champ_df.empty:
+            fig = px.bar(
+                champ_df, x="Champion %", y="Team", orientation="h",
+                title=f"Championship Probability — top 20 ({n_sims:,} sims)",
+                color="Champion %", color_continuous_scale="Blues",
+            )
+            fig.update_layout(
+                yaxis={"categoryorder": "total ascending"},
+                coloraxis_showscale=False, height=500,
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    if not champ_df.empty:
-        fig = px.bar(
-            champ_df, x="Champion %", y="Team", orientation="h",
-            title=f"Championship Probability — top 20 ({n_sims:,} sims)",
-            color="Champion %", color_continuous_scale="Blues",
-        )
-        fig.update_layout(
-            yaxis={"categoryorder": "total ascending"},
-            coloraxis_showscale=False,
-            height=500,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    all_teams = {t for r in REGIONS for t in region_seed_team[r].values() if t}
-    adv_rows = []
-    for team in sorted(all_teams):
-        adv_rows.append({
-            "Team": team,
-            "R32 %":  round(round_adv[team].get(2, 0) / n_sims * 100, 1),
-            "S16 %":  round(round_adv[team].get(3, 0) / n_sims * 100, 1),
-            "E8 %":   round(round_adv[team].get(4, 0) / n_sims * 100, 1),
-            "F4 %":   round(round_adv[team].get(5, 0) / n_sims * 100, 1),
-            "Champ %": round(champion_counts.get(team, 0) / n_sims * 100, 1),
-        })
-
-    if adv_rows:
-        adv_df = pd.DataFrame(adv_rows).sort_values("Champ %", ascending=False)
-        st.subheader("Round Advancement Probabilities")
-        st.dataframe(adv_df, use_container_width=True, hide_index=True)
+        all_teams_set = {t for r in REGIONS for t in region_seed_team[r].values() if t}
+        adv_rows = []
+        for team in sorted(all_teams_set):
+            adv_rows.append({
+                "Team": team,
+                "R32 %":   round(round_adv[team].get(2, 0) / n_sims * 100, 1),
+                "S16 %":   round(round_adv[team].get(3, 0) / n_sims * 100, 1),
+                "E8 %":    round(round_adv[team].get(4, 0) / n_sims * 100, 1),
+                "F4 %":    round(round_adv[team].get(5, 0) / n_sims * 100, 1),
+                "Champ %": round(champion_counts.get(team, 0) / n_sims * 100, 1),
+            })
+        if adv_rows:
+            adv_df = pd.DataFrame(adv_rows).sort_values("Champ %", ascending=False)
+            st.subheader("Round Advancement Probabilities")
+            st.dataframe(adv_df, use_container_width=True, hide_index=True)
 
 else:
-    st.info("Select teams above and click **Project Bracket** to run projections.")
+    st.info("Select teams above and click **🏀 Simulate Tournament** to run projections.")
     st.caption(f"Data as of: {data_note}")
