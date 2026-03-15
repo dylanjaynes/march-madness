@@ -1,13 +1,16 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import json
+from pathlib import Path
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-from src.model.backtest import run_backtest, calculate_roi
+from src.model.backtest import calculate_roi
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
 from src.model.predict import season_label
 
@@ -18,14 +21,46 @@ st.caption(
     "True ATS = actual margin vs. real market spread (not directional accuracy)."
 )
 
-
-@st.cache_data(ttl=3600)
-def load_backtest():
-    return run_backtest()
+RESULTS_PATH = Path("data/processed/backtest_results.json")
+PREDS_PATH = Path("data/processed/backtest_predictions.csv")
 
 
-with st.spinner("Running walk-forward backtest..."):
-    results = load_backtest()
+@st.cache_data(ttl=86400)
+def load_precomputed_backtest():
+    if not RESULTS_PATH.exists() or not PREDS_PATH.exists():
+        return None, None
+
+    with open(RESULTS_PATH) as f:
+        results = json.load(f)
+
+    # JSON keys are always strings; convert per_year keys back to ints
+    if "per_year" in results:
+        results["per_year"] = {int(k): v for k, v in results["per_year"].items()}
+
+    preds_df = pd.read_csv(PREDS_PATH)
+    results["predictions_df"] = preds_df
+
+    computed_at = results.get("computed_at")
+    return results, computed_at
+
+
+results, computed_at = load_precomputed_backtest()
+
+if results is None:
+    st.error(
+        "Backtest results not found. "
+        "Run `scripts/run_backtest.py` locally to generate them."
+    )
+    st.code("python scripts/run_backtest.py", language="bash")
+    st.stop()
+
+if computed_at:
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(computed_at)
+        st.caption(f"Last computed: {dt.strftime('%b %d, %Y at %I:%M %p')}")
+    except Exception:
+        st.caption(f"Last computed: {computed_at}")
 
 preds_df: pd.DataFrame = results.get("predictions_df", pd.DataFrame())
 per_year = results.get("per_year", {})
@@ -102,7 +137,7 @@ roi_5 = calculate_roi([r for r in ats_5["true_ats"].tolist() if r != "PUSH"]) if
 
 spread_rmse = results.get("spread_rmse", 0)
 total_rmse = results.get("total_rmse", 0)
-mkt_rmse = results.get("vs_market_spread_rmse", 0)
+mkt_rmse = results.get("vs_market_spread_rmse", 0) or 0
 n_games = results.get("n_games_total", 0)
 
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -141,6 +176,7 @@ for year, metrics in per_year.items():
     roi = calculate_roi([r for r in yr_df_3["true_ats"].tolist() if r != "PUSH"]) if not yr_df_3.empty else 0.0
     w, l, _ = rec
     pct = w / (w + l) * 100 if (w + l) > 0 else 0
+    mkt_rmse_yr = metrics.get("vs_market_spread_rmse") or 0
     year_rows.append({
         "Year": str(year),
         "Season": season_label(year),
@@ -149,7 +185,7 @@ for year, metrics in per_year.items():
         "ATS (Edge≥3)": ats_str(rec3),
         "ROI (Edge≥3)": f"{roi:+.1f}%",
         "Spread RMSE": round(metrics.get("spread_rmse", 0), 2),
-        "Market RMSE": round(metrics.get("vs_market_spread_rmse", 0), 2),
+        "Market RMSE": round(mkt_rmse_yr, 2),
         "Train Years": str(metrics.get("train_years", [])),
     })
 
@@ -337,7 +373,7 @@ else:
 st.subheader("Feature Importance")
 st.caption("XGBoost feature importances from the final trained models (full dataset).")
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=86400)
 def load_feature_importance():
     from src.model.train import load_model, get_feature_importance
     try:
