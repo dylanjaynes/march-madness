@@ -401,12 +401,20 @@ for date_str, tab in zip(dates, date_tabs):
             final_str = f"{int(score_a)} – {int(score_b)}" if pd.notna(score_a) and pd.notna(score_b) else "TBD"
             winner_team = row["team_a"] if row["actual_margin_a"] > 0 else row["team_b"]
 
-            # Spread strings — always from team_a perspective
+            # Spread display helpers
+            # Internal convention: market_spread_a > 0  = team_a is the FAVORITE
+            # Sportsbook display:  negative             = favored, positive = underdog
+            # → negate when converting internal → display
             def sp_str(team, val):
-                return f"{team} {val:+.1f}" if val is not None and pd.notna(val) else "—"
+                """Show spread in sportsbook convention: negative = favored."""
+                if val is None or not pd.notna(val):
+                    return "—"
+                return f"{team} {-val:+.1f}"   # negate: +7 stored (fav) → shows -7
 
             model_sp  = sp_str(row["team_a"], row.get("model_spread"))
             market_sp = sp_str(row["team_a"], row.get("market_spread_a"))
+            # Actual margin: show raw score difference — not betting convention,
+            # just +/- to indicate team_a won (+) or lost (-)
             actual_sp = f"{row['actual_margin_a']:+.0f}" if pd.notna(row["actual_margin_a"]) else "—"
 
             edge_val = row.get("spread_edge")
@@ -414,15 +422,17 @@ for date_str, tab in zip(dates, date_tabs):
             edge_col = "#2ecc71" if (pd.notna(edge_val) and edge_val and abs(edge_val) >= 3) else "#aaa"
 
             # Which side did the model back?
+            # For team_a bet: sp_str negates market_spread_a  → shows negative (fav) ✓
+            # For team_b bet: flip sign first (-market_spread_a), sp_str negates again
+            #                 → -(-mkt) = +mkt (underdog +line) ✓
             if pd.notna(edge_val) and edge_val is not None:
                 if edge_val >= 0:
                     pick_team = row["team_a"]
-                    pick_line = row.get("market_spread_a")
-                    pick_disp = sp_str(pick_team, pick_line)
+                    pick_disp = sp_str(pick_team, row.get("market_spread_a"))
                 else:
                     pick_team = row["team_b"]
-                    pick_line = -row["market_spread_a"] if row.get("market_spread_a") is not None else None
-                    pick_disp = sp_str(pick_team, pick_line)
+                    mkt_a = row.get("market_spread_a")
+                    pick_disp = sp_str(pick_team, -mkt_a if mkt_a is not None else None)
             else:
                 pick_team = row["team_a"]
                 pick_disp = "—"
