@@ -276,12 +276,12 @@ run_btn = st.button("🏀 Simulate Tournament", type="primary", use_container_wi
 
 
 # ── Bracket HTML visualization ─────────────────────────────────────────────────
-_SLOT_H = 36     # 24px main row + 12px stats row (spread / total)
-_SLOT_W = 128    # slightly wider to fit spread + total text
+_SLOT_H = 24     # single-line slot — spread shown inline, total in tooltip
+_SLOT_W = 136    # wider to fit seed + name + spread + win%
 _GAME_GAP = 3
 _CONN_W = 14     # tighter connectors
 _LABEL_H = 16
-_R64_GAME_H = 82  # height per R64 game slot (accommodates 2-line slots)
+_R64_GAME_H = 60  # height per R64 game slot
 
 
 def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
@@ -290,41 +290,30 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
     bord = "#2d5a87" if is_winner else "#1a2535"
     tc   = "#ddeeff" if is_winner else "#7799aa"
     pc   = "#5aadff" if is_winner else "#3a6a8f"
-    sc   = "#6699bb"   # stats line color
-    nm   = (team[:12] + "…") if len(team) > 13 else team
+    nm   = (team[:11] + "…") if len(team) > 12 else team
 
-    # Stats second line (spread + total)
-    # Betting convention: positive projected_spread = team is favored → display as − (negative)
-    def _fmt_spread(s):
-        sign = "−" if s > 0 else "+"
-        return f"{sign}{abs(s):.1f}"
-
-    if spread is not None and total is not None:
-        stats = (
-            f'<div style="display:flex;justify-content:space-between;'
-            f'padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">'
-            f'<span title="Projected spread">{_fmt_spread(spread)}</span>'
-            f'<span title="Projected total (O/U)">O/U {total:.0f}</span>'
-            f'</div>'
+    # Spread inline: positive model spread = team favored → betting convention − (negative)
+    if spread is not None:
+        sp_sign = "−" if spread > 0 else "+"
+        sp_str  = f"{sp_sign}{abs(spread):.0f}"
+        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.0f}" if total is not None else "")
+        sp_tag  = (
+            f'<span style="font-size:8px;color:#3a5a7a;padding:0 2px;'
+            f'white-space:nowrap;" title="{tooltip}">{sp_str}</span>'
         )
-    elif spread is not None:
-        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">{_fmt_spread(spread)}</div>'
-    elif total is not None:
-        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;text-align:right;">O/U {total:.0f}</div>'
     else:
-        stats = f'<div style="height:12px;"></div>'
+        sp_tag = ""
 
     # prob = model win probability for THIS matchup (not cumulative advancement)
     return (
-        f'<div style="background:{bg};border:1px solid {bord};border-radius:2px;">'
-        f'<div style="display:flex;align-items:center;height:24px;padding:0 4px;">'
+        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;'
+        f'padding:0 4px;background:{bg};border:1px solid {bord};border-radius:2px;">'
         f'<span style="font-size:10px;color:#445;min-width:13px;font-weight:700;">{seed}</span>'
         f'<span style="flex:1;font-size:10px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
-        f'white-space:nowrap;padding:0 3px;">{nm}</span>'
-        f'<span style="font-size:10px;color:{pc};min-width:32px;text-align:right;" '
+        f'white-space:nowrap;padding:0 2px;">{nm}</span>'
+        + sp_tag +
+        f'<span style="font-size:10px;color:{pc};min-width:28px;text-align:right;" '
         f'title="Win probability for this matchup">{prob:.0f}%</span>'
-        f'</div>'
-        + stats +
         f'</div>'
     )
 
@@ -420,32 +409,27 @@ def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool,
     bord = "#2d5a87" if is_winner else "#1a2535"
     tc   = "#ddeeff" if is_winner else "#7799aa"
     pc   = "#5aadff"
-    sc   = "#6699bb"
     nm   = (team[:16] + "…") if len(team) > 17 else team
 
-    def _fmt(s):
-        return ("−" if s > 0 else "+") + f"{abs(s):.1f}"
-
-    if spread is not None and total is not None:
-        stats = (
-            f'<div style="display:flex;justify-content:space-between;width:{width}px;'
-            f'padding:0 5px 1px;font-size:9px;color:{sc};line-height:12px;">'
-            f'<span>{_fmt(spread)}</span><span>O/U {total:.0f}</span></div>'
+    if spread is not None:
+        sp_sign = "−" if spread > 0 else "+"
+        sp_str  = f"{sp_sign}{abs(spread):.0f}"
+        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.0f}" if total is not None else "")
+        sp_tag  = (
+            f'<span style="font-size:8px;color:#3a5a7a;padding:0 3px;white-space:nowrap;"'
+            f' title="{tooltip}">{sp_str}</span>'
         )
-    elif spread is not None:
-        stats = f'<div style="padding:0 5px 1px;font-size:9px;color:{sc};line-height:12px;">{_fmt(spread)}</div>'
     else:
-        stats = f'<div style="height:12px;"></div>'
+        sp_tag = ""
 
     return (
-        f'<div style="background:{bg};border:1px solid {bord};border-radius:2px;width:{width}px;">'
-        f'<div style="display:flex;align-items:center;height:24px;padding:0 5px;">'
+        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;width:{width}px;'
+        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
         f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
         f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
-        f'white-space:nowrap;padding:0 4px;">{nm}</span>'
+        f'white-space:nowrap;padding:0 3px;">{nm}</span>'
+        + sp_tag +
         f'<span style="font-size:10px;color:{pc};min-width:34px;text-align:right;">{prob:.1f}%</span>'
-        f'</div>'
-        + stats +
         f'</div>'
     )
 

@@ -54,6 +54,19 @@ with st.sidebar:
     )
 
 
+# ── Bracket seed lookup (seeds may be NULL in torvik_ratings for current year) ──
+@st.cache_data(ttl=300)
+def load_bracket_seed_map(year: int) -> dict:
+    """Return {team_name: seed} from tournament_bracket table."""
+    df = query_df(
+        "SELECT team, seed FROM tournament_bracket WHERE year=? ORDER BY seed",
+        params=[year],
+    )
+    if df.empty:
+        return {}
+    return dict(zip(df["team"], df["seed"].astype(int)))
+
+
 # ── Odds: fetch, store pre-game snapshots, load pregame reference ──────────────
 @st.cache_data(ttl=120)
 def fetch_live_odds():
@@ -147,6 +160,8 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
     pregame_ref = pregame_ref or {}
     rows, errors = [], []
     now_utc = datetime.now(timezone.utc)
+    # Seed map: used when torvik_ratings.seed is NULL (current year before data refresh)
+    bracket_seeds = load_bracket_seed_map(yr)
 
     for _, game in odds_df.iterrows():
         home = game["home_team"]
@@ -172,7 +187,10 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             days_out = 0
             is_live  = False
 
-        proj = project_game(home, away, round_num=round_ctx, year=yr)
+        seed_home = bracket_seeds.get(home)
+        seed_away = bracket_seeds.get(away)
+        proj = project_game(home, away, round_num=round_ctx, year=yr,
+                            seed_a=seed_home, seed_b=seed_away)
         if "error" in proj:
             errors.append(f"{home} vs {away}: {proj['error']}")
             continue
