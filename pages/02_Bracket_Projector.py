@@ -276,29 +276,54 @@ run_btn = st.button("🏀 Simulate Tournament", type="primary", use_container_wi
 
 
 # ── Bracket HTML visualization ─────────────────────────────────────────────────
-_SLOT_H = 24
-_SLOT_W = 120    # narrower to fit ~1280px laptop screens
+_SLOT_H = 36     # 24px main row + 12px stats row (spread / total)
+_SLOT_W = 128    # slightly wider to fit spread + total text
 _GAME_GAP = 3
 _CONN_W = 14     # tighter connectors
 _LABEL_H = 16
-_R64_GAME_H = 60  # height per R64 game slot
+_R64_GAME_H = 82  # height per R64 game slot (accommodates 2-line slots)
 
 
-def _b_slot(team: str, seed: int, prob: float, is_winner: bool) -> str:
+def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
+             spread: float = None, total: float = None) -> str:
     bg   = "#1b2e40" if is_winner else "#0f1925"
     bord = "#2d5a87" if is_winner else "#1a2535"
     tc   = "#ddeeff" if is_winner else "#7799aa"
     pc   = "#5aadff" if is_winner else "#3a6a8f"
+    sc   = "#6699bb"   # stats line color
     nm   = (team[:12] + "…") if len(team) > 13 else team
+
+    # Stats second line (spread + total)
+    if spread is not None and total is not None:
+        sp_sign = "−" if spread < 0 else "+"
+        sp_str  = f"{sp_sign}{abs(spread):.1f}"
+        stats = (
+            f'<div style="display:flex;justify-content:space-between;'
+            f'padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">'
+            f'<span title="Projected spread">{sp_str}</span>'
+            f'<span title="Projected total (O/U)">O/U {total:.0f}</span>'
+            f'</div>'
+        )
+    elif spread is not None:
+        sp_sign = "−" if spread < 0 else "+"
+        sp_str  = f"{sp_sign}{abs(spread):.1f}"
+        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">{sp_str}</div>'
+    elif total is not None:
+        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;text-align:right;">O/U {total:.0f}</div>'
+    else:
+        stats = f'<div style="height:12px;"></div>'
+
     # prob = model win probability for THIS matchup (not cumulative advancement)
     return (
-        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;'
-        f'padding:0 4px;background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<div style="background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<div style="display:flex;align-items:center;height:24px;padding:0 4px;">'
         f'<span style="font-size:10px;color:#445;min-width:13px;font-weight:700;">{seed}</span>'
         f'<span style="flex:1;font-size:10px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
         f'white-space:nowrap;padding:0 3px;">{nm}</span>'
         f'<span style="font-size:10px;color:{pc};min-width:32px;text-align:right;" '
         f'title="Win probability for this matchup">{prob:.0f}%</span>'
+        f'</div>'
+        + stats +
         f'</div>'
     )
 
@@ -311,9 +336,11 @@ def _b_round_col(games: list, game_h: float, label: str) -> str:
         pad   = max(0, (game_h - inner) / 2)
         col  += (f'<div style="height:{game_h:.1f}px;display:flex;flex-direction:column;justify-content:center;">'
                  f'<div style="padding:{pad:.1f}px 0;">'
-                 + _b_slot(g['a']['team'], g['a']['seed'], g['a']['prob'], g.get('winner') == 'a')
+                 + _b_slot(g['a']['team'], g['a']['seed'], g['a']['prob'], g.get('winner') == 'a',
+                            spread=g['a'].get('spread'), total=g['a'].get('total'))
                  + f'<div style="height:{_GAME_GAP}px;"></div>'
-                 + _b_slot(g['b']['team'], g['b']['seed'], g['b']['prob'], g.get('winner') == 'b')
+                 + _b_slot(g['b']['team'], g['b']['seed'], g['b']['prob'], g.get('winner') == 'b',
+                            spread=g['b'].get('spread'), total=None)
                  + '</div></div>')
     col += '</div>'
     return col
@@ -417,9 +444,21 @@ def _build_bracket_vis(region_all_rounds: dict) -> dict:
                 tb, sb = teams[gi * 2 + 1]
                 wp_a = _wp_cache.get((ta, tb), 1.0 - _wp_cache.get((tb, ta), 0.5))
                 winner = 'a' if ta in next_teams else 'b'
+
+                # Spread: from each team's perspective (cache keyed by better-seed-first)
+                spread_a = _spread_cache.get((ta, tb))
+                if spread_a is None and (tb, ta) in _spread_cache:
+                    spread_a = -_spread_cache[(tb, ta)]
+                spread_b = -spread_a if spread_a is not None else None
+
+                # Total: game-level, symmetric; show only on team_a's slot
+                total_ab = _total_cache.get((ta, tb), _total_cache.get((tb, ta)))
+
                 games.append({
-                    'a': {'team': ta, 'seed': sa, 'prob': wp_a * 100},
-                    'b': {'team': tb, 'seed': sb, 'prob': (1 - wp_a) * 100},
+                    'a': {'team': ta, 'seed': sa, 'prob': wp_a * 100,
+                          'spread': spread_a, 'total': total_ab},
+                    'b': {'team': tb, 'seed': sb, 'prob': (1 - wp_a) * 100,
+                          'spread': spread_b, 'total': None},
                     'winner': winner,
                 })
             rounds_data.append(games)
@@ -502,6 +541,11 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
 # ── Simulation helpers ─────────────────────────────────────────────────────────
 # Win probability cache: (ta, tb) -> float.  Populated once before any simulation.
 _wp_cache: dict = {}
+# Spread cache: (ta, tb) -> float, where ta = better seed (lower number).
+# Positive spread = ta is favored by that many points.
+_spread_cache: dict = {}
+# Total cache: (ta, tb) -> float (game total, symmetric).
+_total_cache: dict = {}
 
 def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
                   use_cache: bool = False, chaos: int = 0) -> float:
@@ -611,16 +655,42 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             except FileNotFoundError:
                 spreads = load_model("spread_model").predict(X)
 
-            for (ta, sa, tb, sb), spread in zip(valid_pairs, spreads):
+            # Also compute totals (pace-adjusted)
+            try:
+                total_model = load_model("total_model")
+                from src.features.adjustments import apply_tournament_pace_adjustment
+                raw_totals = total_model.predict(X)
+                totals = np.array([apply_tournament_pace_adjustment(float(t)) for t in raw_totals])
+            except Exception:
+                totals = np.full(len(X), np.nan)
+
+            for (ta, sa, tb, sb), spread, tot in zip(valid_pairs, spreads, totals):
                 wp_a = spread_to_win_prob(float(spread))
                 _wp_cache[(ta, tb)] = wp_a
                 _wp_cache[(tb, ta)] = 1.0 - wp_a
+                # Spread: ta is always the better seed (pairs built with sa<=sb)
+                _spread_cache[(ta, tb)] = float(spread)   # positive = ta favored
+                _spread_cache[(tb, ta)] = -float(spread)  # from tb's perspective
+                if not np.isnan(tot):
+                    _total_cache[(ta, tb)] = float(tot)
+                    _total_cache[(tb, ta)] = float(tot)
         except Exception as e:
             # Fallback: compute individually if batch fails
             for ta, sa, tb, sb in valid_pairs:
-                wp_a = _get_win_prob(ta, sa, tb, sb, round_num=3)
+                proj = project_game(ta, tb, round_num=3, year=current_year, seed_a=sa, seed_b=sb)
+                if "error" not in proj:
+                    wp_a = proj.get("win_prob_a", 0.5)
+                    spread = proj.get("projected_spread", 0.0)
+                    total  = proj.get("projected_total", None)
+                else:
+                    wp_a, spread, total = 0.5, 0.0, None
                 _wp_cache[(ta, tb)] = wp_a
                 _wp_cache[(tb, ta)] = 1.0 - wp_a
+                _spread_cache[(ta, tb)] = spread
+                _spread_cache[(tb, ta)] = -spread
+                if total is not None:
+                    _total_cache[(ta, tb)] = total
+                    _total_cache[(tb, ta)] = total
 
     bar.progress(1.0, text=f"Done — {total} matchups pre-computed.")
     bar.empty()
@@ -784,6 +854,8 @@ if run_btn:
 
     # ── Step 1: pre-compute all pairwise win probs (single loading phase) ──────
     _wp_cache.clear()
+    _spread_cache.clear()
+    _total_cache.clear()
     _precompute_win_probs(region_seed_team)
 
     # ── Step 2: Monte Carlo simulations (instant from cache) ──────────────────
@@ -852,7 +924,7 @@ if run_btn:
     st.subheader("Simulated Bracket")
     st.caption("One probabilistic run — upsets happen per model win probabilities · % = win prob for that matchup · re-simulate for a different outcome · scroll right for full bracket")
     import streamlit.components.v1 as components
-    components.html(bracket_html, height=1150, scrolling=True)
+    components.html(bracket_html, height=1500, scrolling=True)
 
     st.divider()
 
