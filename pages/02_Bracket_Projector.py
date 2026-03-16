@@ -786,27 +786,26 @@ if run_btn:
     _wp_cache.clear()
     _precompute_win_probs(region_seed_team)
 
-    # ── Step 2: deterministic bracket (instant from cache) ────────────────────
-    region_all_rounds: dict = {}
-    region_winners_det: dict = {}
-    for region in REGIONS:
-        region_all_rounds[region] = simulate_region(
-            region_seed_team[region], deterministic=True, use_cache=True, chaos=chaos
-        )
-        region_winners_det[region] = region_all_rounds[region][-1][0]
-
-    # ── Step 3: Monte Carlo simulations (instant from cache) ──────────────────
+    # ── Step 2: Monte Carlo simulations (instant from cache) ──────────────────
     champion_counts: dict = defaultdict(int)
     # Key: (team, region) to avoid double-counting when the same team name
     # appears in multiple regions (e.g. "Connecticut" in South AND Midwest).
     round_adv: dict = defaultdict(lambda: defaultdict(int))
+    # Save last sim's bracket for the visual display (shows realistic upsets)
+    region_all_rounds: dict = {}
+    region_winners_det: dict = {}
+    f4_display_games_last: list = []
+    champ_candidate = None
+
     for sim in range(n_sims):
         sim_winners = {}
+        sim_rounds_by_region = {}
         for region in REGIONS:
             sim_rounds = simulate_region(
                 region_seed_team[region], deterministic=False, use_cache=True, chaos=chaos
             )
             sim_winners[region] = sim_rounds[-1][0]
+            sim_rounds_by_region[region] = sim_rounds
             for ri, survivors in enumerate(sim_rounds[1:], 2):
                 for team, seed in survivors:
                     round_adv[(team, region)][ri] += 1   # scoped to region
@@ -814,11 +813,15 @@ if run_btn:
             sim_winners, deterministic=False, use_cache=True, chaos=chaos
         )
         champion_counts[sim_champ[0]] += 1
+        # Use the last simulation run for the bracket display
+        region_all_rounds = sim_rounds_by_region
+        region_winners_det = sim_winners
+        champ_candidate = sim_champ
 
     # ── Build bracket visualization ────────────────────────────────────────────
     bracket_vis = _build_bracket_vis(region_all_rounds)
 
-    # Build F4 games data for center display
+    # Build F4 games data for center display using last sim's actual region winners
     f4_display_games = []
     for region_pair in [('East', 'West'), ('South', 'Midwest')]:
         ra, rb = region_pair
@@ -828,17 +831,17 @@ if run_btn:
             fav, fs, dog, ds = ta, sa, tb, sb
         else:
             fav, fs, dog, ds = tb, sb, ta, sa
-        wp = _wp_cache.get((fav, dog), 0.5)
+        wp = _wp_cache.get((fav, dog), _wp_cache.get((dog, fav), 0.5))
+        if (fav, dog) not in _wp_cache and (dog, fav) in _wp_cache:
+            wp = 1.0 - _wp_cache[(dog, fav)]
         if chaos > 0:
             wp = (chaos/100)*0.5 + (1 - chaos/100)*wp
+        f4_winner = 'a' if np.random.random() < wp else 'b'
         f4_display_games.append({
             'a': {'team': fav, 'seed': fs, 'prob': wp * 100},
             'b': {'team': dog, 'seed': ds, 'prob': (1-wp) * 100},
-            'winner': 'a' if wp >= 0.5 else 'b',
+            'winner': f4_winner,
         })
-
-    # Championship game
-    _, champ_candidate = simulate_final_four(region_winners_det, deterministic=True, chaos=chaos)
 
     bracket_html = _build_full_bracket_html(
         bracket_vis, f4_display_games, champ_candidate,
@@ -846,8 +849,8 @@ if run_btn:
     )
 
     # ── Render visual bracket ─────────────────────────────────────────────────
-    st.subheader("Projected Bracket")
-    st.caption("% shown = model win probability for that specific matchup · scroll right to see full bracket")
+    st.subheader("Simulated Bracket")
+    st.caption("One probabilistic run — upsets happen per model win probabilities · % = win prob for that matchup · re-simulate for a different outcome · scroll right for full bracket")
     import streamlit.components.v1 as components
     components.html(bracket_html, height=1150, scrolling=True)
 
