@@ -293,10 +293,12 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
     nm   = (team[:11] + "…") if len(team) > 12 else team
 
     # Spread inline: positive model spread = team favored → betting convention − (negative)
+    # Round to nearest 0.5
     if spread is not None:
-        sp_sign = "−" if spread > 0 else "+"
-        sp_str  = f"{sp_sign}{abs(spread):.0f}"
-        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.0f}" if total is not None else "")
+        sp_rounded = round(spread * 2) / 2
+        sp_sign = "−" if sp_rounded > 0 else "+"
+        sp_str  = f"{sp_sign}{abs(sp_rounded):.1f}"
+        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.1f}" if total is not None else "")
         sp_tag  = (
             f'<span style="font-size:8px;color:#3a5a7a;padding:0 2px;'
             f'white-space:nowrap;" title="{tooltip}">{sp_str}</span>'
@@ -412,9 +414,10 @@ def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool,
     nm   = (team[:16] + "…") if len(team) > 17 else team
 
     if spread is not None:
-        sp_sign = "−" if spread > 0 else "+"
-        sp_str  = f"{sp_sign}{abs(spread):.0f}"
-        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.0f}" if total is not None else "")
+        sp_rounded = round(spread * 2) / 2
+        sp_sign = "−" if sp_rounded > 0 else "+"
+        sp_str  = f"{sp_sign}{abs(sp_rounded):.1f}"
+        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.1f}" if total is not None else "")
         sp_tag  = (
             f'<span style="font-size:8px;color:#3a5a7a;padding:0 3px;white-space:nowrap;"'
             f' title="{tooltip}">{sp_str}</span>'
@@ -499,19 +502,31 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
         f'<div style="display:flex;flex-direction:column;align-items:center;'
         f'justify-content:center;width:{cw + 20}px;padding-top:{_LABEL_H}px;">'
     )
-    if len(f4_games) >= 2:
+    if len(f4_games) >= 1:
         center_html += _f4_game_html(f4_games[0], 'Final Four')
-    center_html += (
-        f'<div style="margin:8px 0;text-align:center;">'
-        f'<div style="font-size:9px;color:#445;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;">Championship</div>'
-        f'<div style="background:#1a3045;border:1px solid #2d5a87;border-radius:4px;padding:6px 10px;min-width:{cw}px;">'
-        f'<div style="font-size:13px;font-weight:700;color:#ffd700;">🏆 {champ_name}</div>'
-        f'<div style="font-size:10px;color:#5aadff;">#{champ_seed} seed · {champ_pct:.1f}%</div>'
-        f'</div></div>'
-    )
+
+    # Championship game (index 2 if present)
     if len(f4_games) >= 3:
-        center_html += _f4_game_html(f4_games[2], 'Final Four')
-    elif len(f4_games) >= 2:
+        center_html += _f4_game_html(f4_games[2], 'Championship')
+        # Winner callout below the game
+        center_html += (
+            f'<div style="text-align:center;padding:4px 0;">'
+            f'<span style="font-size:11px;font-weight:700;color:#ffd700;">🏆 {champ_name}</span>'
+            f'<span style="font-size:9px;color:#5aadff;padding-left:6px;">#{champ_seed} · {champ_pct:.1f}% champ</span>'
+            f'</div>'
+        )
+    else:
+        # Fallback: no championship game data, show plain box
+        center_html += (
+            f'<div style="margin:8px 0;text-align:center;">'
+            f'<div style="font-size:9px;color:#445;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;">Championship</div>'
+            f'<div style="background:#1a3045;border:1px solid #2d5a87;border-radius:4px;padding:6px 10px;min-width:{cw}px;">'
+            f'<div style="font-size:13px;font-weight:700;color:#ffd700;">🏆 {champ_name}</div>'
+            f'<div style="font-size:10px;color:#5aadff;">#{champ_seed} seed · {champ_pct:.1f}%</div>'
+            f'</div></div>'
+        )
+
+    if len(f4_games) >= 2:
         center_html += _f4_game_html(f4_games[1], 'Final Four')
     center_html += '</div>'
 
@@ -930,6 +945,30 @@ if run_btn:
             'b': {'team': dog, 'seed': ds, 'prob': (1-wp) * 100,
                   'spread': sp_dog, 'total': None},
             'winner': f4_winner,
+        })
+
+    # Build championship game from F4 winners
+    if len(f4_display_games) >= 2:
+        g0, g1 = f4_display_games[0], f4_display_games[1]
+        c1 = g0['a'] if g0['winner'] == 'a' else g0['b']
+        c2 = g1['a'] if g1['winner'] == 'a' else g1['b']
+        # fav = lower seed number (better seed)
+        if c1['seed'] <= c2['seed']:
+            cf, cfs, cd, cds = c1['team'], c1['seed'], c2['team'], c2['seed']
+        else:
+            cf, cfs, cd, cds = c2['team'], c2['seed'], c1['team'], c1['seed']
+        wp_champ = _wp_cache.get((cf, cd), 1.0 - _wp_cache.get((cd, cf), 0.5))
+        sp_champ = _spread_cache.get((cf, cd))
+        if sp_champ is None and (cd, cf) in _spread_cache:
+            sp_champ = -_spread_cache[(cd, cf)]
+        tot_champ = _total_cache.get((cf, cd), _total_cache.get((cd, cf)))
+        champ_winner_side = 'a' if (champ_candidate and champ_candidate[0] == cf) else 'b'
+        f4_display_games.append({
+            'a': {'team': cf, 'seed': cfs, 'prob': wp_champ * 100,
+                  'spread': sp_champ, 'total': tot_champ},
+            'b': {'team': cd, 'seed': cds, 'prob': (1 - wp_champ) * 100,
+                  'spread': -sp_champ if sp_champ is not None else None, 'total': None},
+            'winner': champ_winner_side,
         })
 
     bracket_html = _build_full_bracket_html(
