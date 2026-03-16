@@ -88,7 +88,7 @@ MISMATCH_MODEL_PARAMS = {"alpha": 1.0}
 # Adjustments
 NEUTRAL_SITE_ADJUSTMENT = 0
 TOURNAMENT_PACE_HAIRCUT = -2.5
-SPREAD_STD_DEV = 10.5  # For win probability conversion
+SPREAD_STD_DEV = 12.0  # Residual std for win probability — matches walk-forward backtest RMSE
 
 # Conference power conferences
 POWER_CONFERENCES = {"ACC", "Big Ten", "SEC", "Big 12", "Big East", "Pac-12"}
