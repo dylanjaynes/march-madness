@@ -47,31 +47,49 @@ def get_team_list(year: int):
 team_list = get_team_list(current_year)
 
 # ── Bracket source: DB first, then hardcoded projections as fallback ───────────
-# Hardcoded pre-Selection-Sunday projections (used only when DB has no data)
+# 2026 official NCAA tournament bracket (Selection Sunday, March 15 2026)
+# First Four play-in winners: South #16 (Prairie View A&M/Lehigh), West #11 (Texas/NC State),
+#   Midwest #11 (Miami OH/SMU), Midwest #16 (UMBC/Howard)
 _PROJECTED_TEAMS = {
     "East": {
-        1: "Duke", 16: "Baylor", 8: "Alabama", 9: "St. John's (NY)",
-        5: "Michigan State", 12: "New Mexico", 4: "Mississippi State", 13: "BYU",
-        6: "Wisconsin", 11: "Montana", 3: "Arizona", 14: "Akron",
-        7: "Troy", 10: "Ole Miss", 2: "Maryland", 15: "Grand Canyon",
+        1: "Duke", 16: "Siena",
+        8: "Ohio State", 9: "TCU",
+        5: "St. John's (NY)", 12: "Northern Iowa",
+        4: "Kansas", 13: "Cal Baptist",
+        6: "Louisville", 11: "South Florida",
+        3: "Michigan State", 14: "North Dakota State",
+        7: "UCLA", 10: "UCF",
+        2: "Connecticut", 15: "Furman",
     },
     "West": {
-        1: "Auburn", 16: "Alabama State", 8: "Louisville", 9: "Creighton",
-        5: "Michigan", 12: "UC San Diego", 4: "Texas A&M", 13: "Yale",
-        6: "Saint Mary's", 11: "VCU", 3: "Iowa State", 14: "Lipscomb",
-        7: "Marquette", 10: "New Mexico State", 2: "Michigan State", 15: "Bryant",
+        1: "Arizona", 16: "LIU",
+        8: "Villanova", 9: "Utah State",
+        5: "Wisconsin", 12: "High Point",
+        4: "Arkansas", 13: "Hawaii",
+        6: "BYU", 11: "North Carolina State",
+        3: "Gonzaga", 14: "Kennesaw State",
+        7: "Miami FL", 10: "Missouri",
+        2: "Purdue", 15: "Queens",
     },
     "South": {
-        1: "Florida", 16: "Norfolk State", 8: "Connecticut", 9: "Oklahoma",
-        5: "Memphis", 12: "Colorado State", 4: "Maryland", 13: "Grand Canyon",
-        6: "Missouri", 11: "Drake", 3: "Texas Tech", 14: "UNC Wilmington",
-        7: "Kansas", 10: "Arkansas", 2: "Tennessee", 15: "Wofford",
+        1: "Florida", 16: "Lehigh",
+        8: "Clemson", 9: "Iowa",
+        5: "Vanderbilt", 12: "McNeese State",
+        4: "Nebraska", 13: "Troy",
+        6: "North Carolina", 11: "VCU",
+        3: "Illinois", 14: "Penn",
+        7: "Saint Mary's", 10: "Texas A&M",
+        2: "Houston", 15: "Idaho",
     },
     "Midwest": {
-        1: "Houston", 16: "SIU Edwardsville", 8: "Gonzaga", 9: "Georgia",
-        5: "Clemson", 12: "McNeese State", 4: "Purdue", 13: "High Point",
-        6: "Illinois", 11: "TCU", 3: "Kentucky", 14: "Troy",
-        7: "UCLA", 10: "Utah State", 2: "Connecticut", 15: "Tennessee St.",
+        1: "Michigan", 16: "Howard",
+        8: "Georgia", 9: "Saint Louis",
+        5: "Texas Tech", 12: "Akron",
+        4: "Alabama", 13: "Hofstra",
+        6: "Tennessee", 11: "Miami OH",
+        3: "Virginia", 14: "Wright State",
+        7: "Kentucky", 10: "Santa Clara",
+        2: "Iowa State", 15: "Tennessee St.",
     },
 }
 
@@ -89,7 +107,7 @@ DEFAULT_TEAMS = _db_bracket if _db_bracket else _PROJECTED_TEAMS
 _bracket_source = "official" if _db_bracket else "projected"
 
 # ── Bracket fetch UI ──────────────────────────────────────────────────────────
-_col_status, _col_espn, _col_official = st.columns([3, 1, 1])
+_col_status, _col_official, _col_save, _col_proj = st.columns([3, 1, 1, 1])
 with _col_status:
     if _bracket_source == "official":
         st.success(
@@ -99,14 +117,48 @@ with _col_status:
         )
     else:
         st.info(
-            "📋 **Using projected bracket** — click **CBS Bracketology** to load Jerry Palm's latest "
-            "projections, or **Official Bracket** after Selection Sunday.",
+            "📋 **2026 bracket pre-loaded** (Selection Sunday) — "
+            "click **💾 Save to DB** to persist it, or **🔄 Fetch SR** to pull from Sports Reference.",
             icon=None,
         )
 
-with _col_espn:
-    if st.button("📡 CBS Bracketology", use_container_width=True,
-                 help="Loads Jerry Palm's latest bracket projection from CBS Sports. Updates frequently before Selection Sunday."):
+with _col_official:
+    if st.button("🔄 Fetch SR", use_container_width=True, type="primary",
+                 help="Fetches the official 2026 NCAA bracket from Sports Reference. "
+                      "SR usually publishes within a few hours of Selection Sunday."):
+        with st.spinner("Fetching bracket from Sports Reference..."):
+            try:
+                bracket = fetch_and_store_bracket(current_year)
+                if bracket:
+                    n = sum(len(v) for v in bracket.values())
+                    st.success(f"✅ Loaded {n} teams across {len(bracket)} regions!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning(
+                        "Sports Reference hasn't published the 2026 bracket yet — "
+                        "use **💾 Save to DB** to store the known bracket now.",
+                        icon="⚠️",
+                    )
+            except Exception as e:
+                st.error(f"Fetch failed: {e}")
+
+with _col_save:
+    if st.button("💾 Save to DB", use_container_width=True,
+                 help="Save the current hardcoded 2026 bracket to the database."):
+        try:
+            from src.ingest.bracket import store_bracket
+            n = store_bracket(current_year, _PROJECTED_TEAMS)
+            st.success(f"✅ Saved {n} teams!")
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Save failed: {e}")
+
+with _col_proj:
+    if st.button("📡 Projected", use_container_width=True,
+                 help="Load pre-Selection Sunday bracket projections from CBS Sports (bracketology). "
+                      "Now that the official bracket is released, use '🔄 Fetch SR' instead."):
         with st.spinner("Fetching CBS Sports Bracketology..."):
             try:
                 bracket = fetch_and_store_projected_bracket_espn(current_year)
@@ -117,29 +169,12 @@ with _col_espn:
                     st.rerun()
                 else:
                     st.warning(
-                        "Could not parse CBS Sports bracketology — the page structure may "
-                        "have changed. Try the official bracket after Selection Sunday, "
-                        "or enter teams manually above.",
-                        icon="⚠️",
+                        "⚠️ CBS Sports bracketology is no longer available — "
+                        "their page now shows the official bracket (JS-rendered, not scrapable). "
+                        "Use **🔄 Official Bracket** instead.",
                     )
             except Exception as e:
                 st.error(f"CBS fetch failed: {e}")
-
-with _col_official:
-    if st.button("🔄 Official Bracket", use_container_width=True,
-                 help="Fetches the official bracket from Sports Reference. Available after Selection Sunday."):
-        with st.spinner("Fetching bracket from Sports Reference..."):
-            try:
-                bracket = fetch_and_store_bracket(current_year)
-                if bracket:
-                    n = sum(len(v) for v in bracket.values())
-                    st.success(f"Loaded {n} teams across {len(bracket)} regions!")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.warning("Bracket not yet available on Sports Reference. Try again after Selection Sunday.")
-            except Exception as e:
-                st.error(f"Fetch failed: {e}")
 
 
 def _resolve_default(name: str) -> str:

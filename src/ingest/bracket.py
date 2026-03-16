@@ -38,19 +38,38 @@ def fetch_bracket(year: int) -> dict:
     Scrape the R64 bracket (seeds + teams per region) from Sports Reference.
     Returns dict: {"East": {1: "Duke", 16: "Baylor", ...}, "West": {...}, ...}
     Returns empty dict if page not yet available (pre-bracket-release).
-    """
-    url = f"https://www.sports-reference.com/cbb/postseason/{year}-ncaa.html"
-    print(f"  [bracket] Fetching {year} bracket from {url}")
-    time.sleep(1.5)  # be polite
 
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=25)
-        resp.raise_for_status()
-    except Exception as e:
-        print(f"  [bracket] Failed to fetch: {e}")
+    Tries two URL formats — Sports Reference added a /men/ path in recent years.
+    """
+    # Try new URL format first (/men/ subdirectory), then fall back to legacy
+    urls = [
+        f"https://www.sports-reference.com/cbb/postseason/men/{year}-ncaa.html",
+        f"https://www.sports-reference.com/cbb/postseason/{year}-ncaa.html",
+    ]
+
+    resp = None
+    for url in urls:
+        print(f"  [bracket] Trying {url}")
+        time.sleep(1.5)  # be polite
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=25)
+            if r.status_code == 200:
+                resp = r
+                print(f"  [bracket] Got 200 from {url}")
+                break
+            else:
+                print(f"  [bracket] Got {r.status_code} from {url}, trying next...")
+        except Exception as e:
+            print(f"  [bracket] Error fetching {url}: {e}")
+
+    if resp is None:
+        print("  [bracket] All URLs failed")
         return {}
 
     soup = BeautifulSoup(resp.text, "lxml")
+    # Debug: check what region divs exist on the page
+    found_ids = [d.get("id") for d in soup.find_all("div", id=True) if d.get("id") in SR_REGION_MAP]
+    print(f"  [bracket] Region divs found: {found_ids}")
     bracket = {}
 
     for region_id, region_name in SR_REGION_MAP.items():
