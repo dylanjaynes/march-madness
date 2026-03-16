@@ -294,20 +294,21 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
     nm   = (team[:12] + "…") if len(team) > 13 else team
 
     # Stats second line (spread + total)
+    # Betting convention: positive projected_spread = team is favored → display as − (negative)
+    def _fmt_spread(s):
+        sign = "−" if s > 0 else "+"
+        return f"{sign}{abs(s):.1f}"
+
     if spread is not None and total is not None:
-        sp_sign = "−" if spread < 0 else "+"
-        sp_str  = f"{sp_sign}{abs(spread):.1f}"
         stats = (
             f'<div style="display:flex;justify-content:space-between;'
             f'padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">'
-            f'<span title="Projected spread">{sp_str}</span>'
+            f'<span title="Projected spread">{_fmt_spread(spread)}</span>'
             f'<span title="Projected total (O/U)">O/U {total:.0f}</span>'
             f'</div>'
         )
     elif spread is not None:
-        sp_sign = "−" if spread < 0 else "+"
-        sp_str  = f"{sp_sign}{abs(spread):.1f}"
-        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">{sp_str}</div>'
+        stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;">{_fmt_spread(spread)}</div>'
     elif total is not None:
         stats = f'<div style="padding:0 4px 1px;font-size:9px;color:{sc};line-height:12px;text-align:right;">O/U {total:.0f}</div>'
     else:
@@ -413,19 +414,38 @@ def _b_region(rounds_data: list, name: str, flip: bool = False) -> str:
     return row
 
 
-def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool, width: int = 150) -> str:
+def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool,
+                   width: int = 150, spread: float = None, total: float = None) -> str:
     bg   = "#1b2e40" if is_winner else "#0f1925"
     bord = "#2d5a87" if is_winner else "#1a2535"
     tc   = "#ddeeff" if is_winner else "#7799aa"
     pc   = "#5aadff"
+    sc   = "#6699bb"
     nm   = (team[:16] + "…") if len(team) > 17 else team
+
+    def _fmt(s):
+        return ("−" if s > 0 else "+") + f"{abs(s):.1f}"
+
+    if spread is not None and total is not None:
+        stats = (
+            f'<div style="display:flex;justify-content:space-between;width:{width}px;'
+            f'padding:0 5px 1px;font-size:9px;color:{sc};line-height:12px;">'
+            f'<span>{_fmt(spread)}</span><span>O/U {total:.0f}</span></div>'
+        )
+    elif spread is not None:
+        stats = f'<div style="padding:0 5px 1px;font-size:9px;color:{sc};line-height:12px;">{_fmt(spread)}</div>'
+    else:
+        stats = f'<div style="height:12px;"></div>'
+
     return (
-        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;width:{width}px;'
-        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
+        f'<div style="background:{bg};border:1px solid {bord};border-radius:2px;width:{width}px;">'
+        f'<div style="display:flex;align-items:center;height:24px;padding:0 5px;">'
         f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
         f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
         f'white-space:nowrap;padding:0 4px;">{nm}</span>'
         f'<span style="font-size:10px;color:{pc};min-width:34px;text-align:right;">{prob:.1f}%</span>'
+        f'</div>'
+        + stats +
         f'</div>'
     )
 
@@ -480,9 +500,11 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
             f'<div style="margin:4px 0;">'
             f'<div style="font-size:9px;color:#445;text-align:center;letter-spacing:.4px;'
             f'text-transform:uppercase;padding-bottom:2px;">{region_label}</div>'
-            + _b_center_slot(a['team'], a['seed'], a['prob'], w == 'a', cw)
+            + _b_center_slot(a['team'], a['seed'], a['prob'], w == 'a', cw,
+                             spread=a.get('spread'), total=a.get('total'))
             + f'<div style="height:{_GAME_GAP}px;"></div>'
-            + _b_center_slot(b['team'], b['seed'], b['prob'], w == 'b', cw)
+            + _b_center_slot(b['team'], b['seed'], b['prob'], w == 'b', cw,
+                             spread=b.get('spread'))
             + '</div>'
         )
 
@@ -569,7 +591,7 @@ def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
         raw_wp = 0.5 if "error" in proj else proj.get("win_prob_a", 0.5)
 
     if chaos > 0:
-        alpha = chaos / 100.0
+        alpha = (chaos / 100.0) ** 2  # quadratic: gentler at low values
         raw_wp = alpha * 0.5 + (1 - alpha) * raw_wp
     return raw_wp
 
@@ -907,11 +929,22 @@ if run_btn:
         if (fav, dog) not in _wp_cache and (dog, fav) in _wp_cache:
             wp = 1.0 - _wp_cache[(dog, fav)]
         if chaos > 0:
-            wp = (chaos/100)*0.5 + (1 - chaos/100)*wp
+            alpha = (chaos / 100) ** 2  # quadratic: gentler at low values
+            wp = alpha * 0.5 + (1 - alpha) * wp
         f4_winner = 'a' if np.random.random() < wp else 'b'
+
+        # Spread/total for F4 center display
+        sp_fav = _spread_cache.get((fav, dog))
+        if sp_fav is None and (dog, fav) in _spread_cache:
+            sp_fav = -_spread_cache[(dog, fav)]
+        sp_dog = -sp_fav if sp_fav is not None else None
+        tot_f4 = _total_cache.get((fav, dog), _total_cache.get((dog, fav)))
+
         f4_display_games.append({
-            'a': {'team': fav, 'seed': fs, 'prob': wp * 100},
-            'b': {'team': dog, 'seed': ds, 'prob': (1-wp) * 100},
+            'a': {'team': fav, 'seed': fs, 'prob': wp * 100,
+                  'spread': sp_fav, 'total': tot_f4},
+            'b': {'team': dog, 'seed': ds, 'prob': (1-wp) * 100,
+                  'spread': sp_dog, 'total': None},
             'winner': f4_winner,
         })
 
