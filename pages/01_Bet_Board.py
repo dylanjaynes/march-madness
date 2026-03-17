@@ -21,22 +21,6 @@ data_note = data_as_of(current_year)
 
 st.caption(f"**{season} season** · {data_note} · Ranked by edge vs. market spread")
 
-# ── Bankroll sidebar ─────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("Bet Sizing")
-    bankroll = st.number_input("Bankroll ($)", min_value=100, max_value=1_000_000,
-                                value=1000, step=100)
-    sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
-    min_edge = st.slider("Min edge threshold (pts)", 0.0, 10.0, 3.0, 0.5)
-    show_passes = st.checkbox("Show Pass-tier bets", value=False)
-    show_nit = st.checkbox("Show NIT games", value=True)
-    st.divider()
-    if st.button("🔄 Refresh odds & projections"):
-        load_bet_board.clear()
-        st.rerun()
-    st.caption("Half Kelly is recommended to reduce variance.")
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 _EDT = timezone(timedelta(hours=-4))  # Eastern Daylight Time (UTC-4, in effect during March tournament)
 
@@ -197,6 +181,23 @@ def load_bet_board(year: int):
                 rows.append(proj)
 
     return pd.DataFrame(rows)
+
+
+# ── Bankroll sidebar ─────────────────────────────────────────────────────────
+# Defined after load_bet_board so the Refresh button can call load_bet_board.clear()
+with st.sidebar:
+    st.header("Bet Sizing")
+    bankroll = st.number_input("Bankroll ($)", min_value=100, max_value=1_000_000,
+                                value=1000, step=100)
+    sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
+    min_edge = st.slider("Min edge threshold (pts)", 0.0, 10.0, 3.0, 0.5)
+    show_passes = st.checkbox("Show Pass-tier bets", value=False)
+    show_nit = st.checkbox("Show NIT games", value=True)
+    st.divider()
+    if st.button("🔄 Refresh odds & projections"):
+        load_bet_board.clear()
+        st.rerun()
+    st.caption("Half Kelly is recommended to reduce variance.")
 
 
 with st.spinner("Loading projections..."):
