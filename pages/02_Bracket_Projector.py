@@ -276,164 +276,209 @@ run_btn = st.button("🏀 Simulate Tournament", type="primary", use_container_wi
 
 
 # ── Bracket HTML visualization ─────────────────────────────────────────────────
-_SLOT_H = 24     # single-line slot — spread shown inline, total in tooltip
-_SLOT_W = 136    # wider to fit seed + name + spread + win%
-_GAME_GAP = 3
-_CONN_W = 14     # tighter connectors
-_LABEL_H = 16
-_R64_GAME_H = 60  # height per R64 game slot
+_SLOT_H     = 28   # height of one team row inside a game card
+_SLOT_W     = 148  # width of a game card
+_GAME_GAP   = 1    # height of the divider line between team rows
+_CONN_W     = 14   # connector SVG width
+_R64_GAME_H = 68   # height allocated per R64 game row
+_STROKE     = "#c6c8cb"
+_STROKE_W   = "1.5"
 
 
 def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
              spread: float = None, total: float = None) -> str:
-    bg   = "#1b2e40" if is_winner else "#0f1925"
-    bord = "#2d5a87" if is_winner else "#1a2535"
-    tc   = "#ddeeff" if is_winner else "#7799aa"
-    pc   = "#5aadff" if is_winner else "#3a6a8f"
-    nm   = (team[:11] + "…") if len(team) > 12 else team
+    """One team row inside a game card (light theme)."""
+    tc = "#1a1a1a" if is_winner else "#8a8c8d"
+    fw = "600"    if is_winner else "400"
+    pc = "#06c"   if is_winner else "#b0b2b4"
+    nm = (team[:12] + "…") if len(team) > 13 else team
 
-    # Spread inline: positive model spread = team favored → betting convention − (negative)
-    # Round to nearest 0.5
+    seed_span = (
+        f'<span style="font-size:9px;color:#555;background:#f2f4f6;border-radius:3px;'
+        f'padding:1px 3px;min-width:14px;text-align:center;flex-shrink:0;margin-right:4px;">'
+        f'{seed}</span>'
+    )
+    name_span = (
+        f'<span style="flex:1;font-size:10px;color:{tc};font-weight:{fw};'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{nm}</span>'
+    )
     if spread is not None:
         sp_rounded = round(spread * 2) / 2
-        sp_sign = "−" if sp_rounded > 0 else "+"
-        sp_str  = f"{sp_sign}{abs(sp_rounded):.1f}"
-        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.1f}" if total is not None else "")
-        sp_tag  = (
-            f'<span style="font-size:8px;color:#3a5a7a;padding:0 2px;'
-            f'white-space:nowrap;" title="{tooltip}">{sp_str}</span>'
+        sp_sign    = "−" if sp_rounded > 0 else "+"
+        sp_str     = f"{sp_sign}{abs(sp_rounded):.1f}"
+        tooltip    = f"Spread: {sp_str}" + (f" · O/U {total:.1f}" if total is not None else "")
+        spread_span = (
+            f'<span style="font-size:8px;color:#888;margin-left:3px;white-space:nowrap;"'
+            f' title="{tooltip}">{sp_str}</span>'
         )
     else:
-        sp_tag = ""
-
-    # prob = model win probability for THIS matchup (not cumulative advancement)
+        spread_span = ""
+    prob_span = (
+        f'<span style="font-size:10px;color:{pc};margin-left:auto;padding-left:4px;'
+        f'white-space:nowrap;">{prob:.0f}%</span>'
+    )
     return (
-        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;'
-        f'padding:0 4px;background:{bg};border:1px solid {bord};border-radius:2px;">'
-        f'<span style="font-size:10px;color:#445;min-width:13px;font-weight:700;">{seed}</span>'
-        f'<span style="flex:1;font-size:10px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
-        f'white-space:nowrap;padding:0 2px;">{nm}</span>'
-        + sp_tag +
-        f'<span style="font-size:10px;color:{pc};min-width:28px;text-align:right;" '
-        f'title="Win probability for this matchup">{prob:.0f}%</span>'
+        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;padding:0 6px;">'
+        + seed_span + name_span + spread_span + prob_span +
         f'</div>'
     )
 
 
-def _b_round_col(games: list, game_h: float, label: str) -> str:
-    lh = f'<div style="height:{_LABEL_H}px;font-size:9px;color:#445;text-align:center;letter-spacing:.4px;text-transform:uppercase;display:flex;align-items:center;justify-content:center;">{label}</div>'
-    col = f'<div style="display:flex;flex-direction:column;width:{_SLOT_W}px;">{lh}'
-    for g in games:
-        inner = 2 * _SLOT_H + _GAME_GAP
-        pad   = max(0, (game_h - inner) / 2)
-        col  += (f'<div style="height:{game_h:.1f}px;display:flex;flex-direction:column;justify-content:center;">'
-                 f'<div style="padding:{pad:.1f}px 0;">'
-                 + _b_slot(g['a']['team'], g['a']['seed'], g['a']['prob'], g.get('winner') == 'a',
-                            spread=g['a'].get('spread'), total=g['a'].get('total'))
-                 + f'<div style="height:{_GAME_GAP}px;"></div>'
-                 + _b_slot(g['b']['team'], g['b']['seed'], g['b']['prob'], g.get('winner') == 'b',
-                            spread=g['b'].get('spread'), total=None)
-                 + '</div></div>')
-    col += '</div>'
-    return col
+def _b_game_card(game: dict, width: int = None) -> str:
+    """Render one matchup as a styled card (two team rows + divider)."""
+    w = width if width is not None else _SLOT_W
+    a, b, winner = game['a'], game['b'], game.get('winner', 'a')
+    slot_a = _b_slot(a['team'], a['seed'], a['prob'], winner == 'a',
+                     spread=a.get('spread'), total=a.get('total'))
+    slot_b = _b_slot(b['team'], b['seed'], b['prob'], winner == 'b',
+                     spread=b.get('spread'), total=None)
+    return (
+        f'<div style="width:{w}px;border:1px solid #d8dade;border-radius:6px;'
+        f'background:linear-gradient(180deg,#fff 0%,#fcfcfd 100%);'
+        f'box-shadow:0 1px 2px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.08);overflow:hidden;">'
+        + slot_a
+        + f'<div style="height:1px;background:#eceef1;"></div>'
+        + slot_b
+        + f'</div>'
+    )
 
 
 def _b_conn_ltr(n_left: int, left_game_h: float) -> str:
-    """LTR connector: n_left games → n_left/2 games."""
-    total_h = n_left * left_game_h + _LABEL_H
-    lines = []
-    xm = _CONN_W // 2
+    """LTR connector SVG: n_left games (left) → n_left/2 games (right)."""
+    total_h = n_left * left_game_h
+    lines, xm = [], _CONN_W // 2
     for i in range(n_left // 2):
-        y1 = _LABEL_H + (2*i)   * left_game_h + left_game_h / 2
-        y2 = _LABEL_H + (2*i+1) * left_game_h + left_game_h / 2
+        y1 = (2 * i)     * left_game_h + left_game_h / 2
+        y2 = (2 * i + 1) * left_game_h + left_game_h / 2
         ym = (y1 + y2) / 2
         lines += [
-            f'<line x1="0" y1="{y1:.1f}" x2="{xm}" y2="{y1:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="0" y1="{y2:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="{xm}" y1="{y1:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="{xm}" y1="{ym:.1f}" x2="{_CONN_W}" y2="{ym:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="0" y1="{y1:.1f}" x2="{xm}" y2="{y1:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="0" y1="{y2:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="{xm}" y1="{y1:.1f}" x2="{xm}" y2="{y2:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="{xm}" y1="{ym:.1f}" x2="{_CONN_W}" y2="{ym:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
         ]
-    return f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;overflow:visible;">{"".join(lines)}</svg>'
+    return (f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;">'
+            + "".join(lines) + '</svg>')
 
 
 def _b_conn_rtl(n_right: int, right_game_h: float) -> str:
-    """RTL connector: n_right/2 games (left) → n_right games (right)."""
+    """RTL connector SVG: n_right/2 games (left) → n_right games (right)."""
     left_game_h = right_game_h * 2
-    n_left = n_right // 2
-    total_h = n_left * left_game_h + _LABEL_H
-    lines = []
-    xm = _CONN_W // 2
+    n_left      = n_right // 2
+    total_h     = n_left * left_game_h
+    lines, xm   = [], _CONN_W // 2
     for i in range(n_left):
-        y_l = _LABEL_H + i * left_game_h + left_game_h / 2
-        yr1 = _LABEL_H + (2*i)   * right_game_h + right_game_h / 2
-        yr2 = _LABEL_H + (2*i+1) * right_game_h + right_game_h / 2
+        y_l = i * left_game_h + left_game_h / 2
+        yr1 = (2 * i)     * right_game_h + right_game_h / 2
+        yr2 = (2 * i + 1) * right_game_h + right_game_h / 2
         lines += [
-            f'<line x1="0" y1="{y_l:.1f}" x2="{xm}" y2="{y_l:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{_CONN_W}" y2="{yr1:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="{xm}" y1="{yr2:.1f}" x2="{_CONN_W}" y2="{yr2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
-            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{xm}" y2="{yr2:.1f}" stroke="#1e3a54" stroke-width="1.5"/>',
+            f'<line x1="0" y1="{y_l:.1f}" x2="{xm}" y2="{y_l:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{_CONN_W}" y2="{yr1:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="{xm}" y1="{yr2:.1f}" x2="{_CONN_W}" y2="{yr2:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
+            f'<line x1="{xm}" y1="{yr1:.1f}" x2="{xm}" y2="{yr2:.1f}" stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>',
         ]
-    return f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;overflow:visible;">{"".join(lines)}</svg>'
+    return (f'<svg width="{_CONN_W}" height="{total_h:.0f}" style="flex-shrink:0;">'
+            + "".join(lines) + '</svg>')
+
+
+def _b_r32s16_col(r32_games: list, s16_games: list, side: str) -> str:
+    """Combined R32+S16 column: S16 card floats between the two R32 cards it feeds from,
+    indented toward E8 (which is always the innermost column of the region)."""
+    half_h  = 4 * _R64_GAME_H        # height of one half-group (covers 4 R64 rows)
+    total_h = 8 * _R64_GAME_H        # full column height
+    game_h  = 2 * _SLOT_H + _GAME_GAP
+    indent  = 8                      # S16 indent pixels toward E8
+    s16_w   = _SLOT_W - indent
+
+    html = f'<div style="position:relative;width:{_SLOT_W}px;height:{total_h}px;flex-shrink:0;">'
+    for grp in range(2):
+        yo = grp * half_h
+
+        # R32-top: vertically centered in the top half of the group
+        r32_top_y = yo + (half_h / 2 - game_h) / 2
+        html += (
+            f'<div style="position:absolute;top:{r32_top_y:.1f}px;left:0;right:0;">'
+            + _b_game_card(r32_games[grp * 2], _SLOT_W)
+            + '</div>'
+        )
+
+        # S16: centered across the full group, indented toward E8
+        s16_y = yo + (half_h - game_h) / 2
+        s16_x = indent if side == 'left' else 0
+        html += (
+            f'<div style="position:absolute;top:{s16_y:.1f}px;left:{s16_x}px;">'
+            + _b_game_card(s16_games[grp], s16_w)
+            + '</div>'
+        )
+
+        # R32-bot: vertically centered in the bottom half of the group
+        r32_bot_y = yo + half_h / 2 + (half_h / 2 - game_h) / 2
+        html += (
+            f'<div style="position:absolute;top:{r32_bot_y:.1f}px;left:0;right:0;">'
+            + _b_game_card(r32_games[grp * 2 + 1], _SLOT_W)
+            + '</div>'
+        )
+    html += '</div>'
+    return html
 
 
 def _b_region(rounds_data: list, name: str, flip: bool = False) -> str:
+    """Render one bracket region (light theme, R32+S16 combined column).
+    flip=False → left side  (R64 outermost, E8 innermost)
+    flip=True  → right side (E8 outermost, R64 innermost)
     """
-    4 rounds: [R64_games, R32_games, S16_games, E8_games]
-    flip=True for right-side regions (display order reversed: E8→S16→R32→R64)
-    """
-    labels = ['R64', 'R32', 'S16', 'E8']
-    items  = [(rounds_data[ri], _R64_GAME_H * (2**ri), labels[ri]) for ri in range(4)]
-    if flip:
-        items = list(reversed(items))
+    r64 = rounds_data[0]   # 8 games
+    r32 = rounds_data[1]   # 4 games
+    s16 = rounds_data[2]   # 2 games
+    e8  = rounds_data[3]   # 1 game
 
-    rlabel = (f'<div style="font-size:10px;font-weight:700;color:#5588aa;'
-              f'text-align:center;padding:3px 0;letter-spacing:1px;'
-              f'text-transform:uppercase;">{name}</div>')
-    row = f'<div>{rlabel}<div style="display:flex;align-items:flex-start;">'
+    total_h = 8 * _R64_GAME_H
+    side    = 'right' if flip else 'left'
 
-    for idx, (gms, gh, lbl) in enumerate(items):
-        row += _b_round_col(gms, gh, lbl)
-        if idx < len(items) - 1:
-            if not flip:
-                row += _b_conn_ltr(len(gms), gh)
-            else:
-                next_n = len(items[idx+1][0])
-                next_gh = items[idx+1][1]
-                row += _b_conn_rtl(next_n, next_gh)
+    # Region label above the grid
+    label_align = 'right' if flip else 'left'
+    label_html  = (
+        f'<div style="font-size:10px;font-weight:800;color:#6c6e6f;text-transform:uppercase;'
+        f'letter-spacing:.08em;text-align:{label_align};padding:0 4px 6px;">{name}</div>'
+    )
 
-    row += '</div></div>'
-    return row
-
-
-def _b_center_slot(team: str, seed: int, prob: float, is_winner: bool,
-                   width: int = 150, spread: float = None, total: float = None) -> str:
-    bg   = "#1b2e40" if is_winner else "#0f1925"
-    bord = "#2d5a87" if is_winner else "#1a2535"
-    tc   = "#ddeeff" if is_winner else "#7799aa"
-    pc   = "#5aadff"
-    nm   = (team[:16] + "…") if len(team) > 17 else team
-
-    if spread is not None:
-        sp_rounded = round(spread * 2) / 2
-        sp_sign = "−" if sp_rounded > 0 else "+"
-        sp_str  = f"{sp_sign}{abs(sp_rounded):.1f}"
-        tooltip = f"Spread: {sp_str}" + (f" · O/U {total:.1f}" if total is not None else "")
-        sp_tag  = (
-            f'<span style="font-size:8px;color:#3a5a7a;padding:0 3px;white-space:nowrap;"'
-            f' title="{tooltip}">{sp_str}</span>'
+    # R64 column — 8 game cards, each centered inside a _R64_GAME_H slot
+    r64_col = f'<div style="display:flex;flex-direction:column;width:{_SLOT_W}px;flex-shrink:0;">'
+    for g in r64:
+        r64_col += (
+            f'<div style="height:{_R64_GAME_H}px;display:flex;align-items:center;">'
+            + _b_game_card(g, _SLOT_W) + '</div>'
         )
+    r64_col += '</div>'
+
+    # R32+S16 combined column
+    r32s16_col = _b_r32s16_col(r32, s16, side)
+
+    # E8 column — 1 game card vertically centered across full height
+    e8_col = (
+        f'<div style="display:flex;align-items:center;width:{_SLOT_W}px;'
+        f'height:{total_h}px;flex-shrink:0;">'
+        + _b_game_card(e8[0], _SLOT_W) + '</div>'
+    )
+
+    # Connectors (all 544 px tall to match region columns)
+    # LTR: used for left-side region (R64→R32 and S16→E8)
+    conn_r64_r32 = _b_conn_ltr(8, _R64_GAME_H)           # 8 → 4
+    conn_s16_e8  = _b_conn_ltr(2, 4 * _R64_GAME_H)       # 2 → 1
+    # RTL: used for right-side region (E8→S16 and R32→R64)
+    conn_e8_s16  = _b_conn_rtl(2, 4 * _R64_GAME_H)       # 1 → 2
+    conn_r32_r64 = _b_conn_rtl(8, _R64_GAME_H)           # 4 → 8
+
+    if not flip:
+        inner = r64_col + conn_r64_r32 + r32s16_col + conn_s16_e8 + e8_col
     else:
-        sp_tag = ""
+        inner = e8_col + conn_e8_s16 + r32s16_col + conn_r32_r64 + r64_col
 
     return (
-        f'<div style="display:flex;align-items:center;height:{_SLOT_H}px;width:{width}px;'
-        f'padding:0 5px;background:{bg};border:1px solid {bord};border-radius:2px;">'
-        f'<span style="font-size:10px;color:#445;min-width:14px;font-weight:700;">{seed}</span>'
-        f'<span style="flex:1;font-size:11px;color:{tc};overflow:hidden;text-overflow:ellipsis;'
-        f'white-space:nowrap;padding:0 3px;">{nm}</span>'
-        + sp_tag +
-        f'<span style="font-size:10px;color:{pc};min-width:34px;text-align:right;">{prob:.1f}%</span>'
-        f'</div>'
+        f'<div>'
+        + label_html
+        + f'<div style="display:flex;align-items:flex-start;">{inner}</div>'
+        + '</div>'
     )
 
 
@@ -475,86 +520,114 @@ def _build_bracket_vis(region_all_rounds: dict) -> dict:
 
 def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
                               champion_counts: dict, n_sims: int) -> str:
-    """Build the complete bracket HTML string."""
-    # F4 / Championship center column
-    cw = 155  # center slot width
-    f4_h = _R64_GAME_H * 16  # total height of one region pair (East+Midwest)
+    """Build the complete bracket HTML — leerob-inspired light theme.
 
-    def _f4_game_html(game_dict, region_label):
-        a, b = game_dict['a'], game_dict['b']
-        w = game_dict.get('winner', 'a')
-        return (
-            f'<div style="margin:4px 0;">'
-            f'<div style="font-size:9px;color:#445;text-align:center;letter-spacing:.4px;'
-            f'text-transform:uppercase;padding-bottom:2px;">{region_label}</div>'
-            + _b_center_slot(a['team'], a['seed'], a['prob'], w == 'a', cw,
-                             spread=a.get('spread'), total=a.get('total'))
-            + f'<div style="height:{_GAME_GAP}px;"></div>'
-            + _b_center_slot(b['team'], b['seed'], b['prob'], w == 'b', cw,
-                             spread=b.get('spread'))
-            + '</div>'
-        )
+    Layout (vertical stack):
+        Top pair:    East (left) + West (right)   — E8s face each other
+        Center:      [FF East/West] ─ [Championship] ─ [FF South/Midwest]
+        Bottom pair: South (left) + Midwest (right) — E8s face each other
+    """
+    east    = bracket_vis.get('East',    [[]] * 4)
+    west    = bracket_vis.get('West',    [[]] * 4)
+    south   = bracket_vis.get('South',   [[]] * 4)
+    midwest = bracket_vis.get('Midwest', [[]] * 4)
 
     champ_name, champ_seed = champion
     champ_pct = champion_counts.get(champ_name, 0) / n_sims * 100 if n_sims else 0
 
-    center_html = (
-        f'<div style="display:flex;flex-direction:column;align-items:center;'
-        f'justify-content:center;width:{cw + 20}px;padding-top:{_LABEL_H}px;">'
-    )
-    if len(f4_games) >= 1:
-        center_html += _f4_game_html(f4_games[0], 'Final Four')
+    # ── Center cluster: FF-left | h-conn | Championship | h-conn | FF-right ──
+    ff_w    = 155   # FF game card width
+    champ_w = 170   # Championship card width
+    h_cw    = 28    # horizontal connector width
+    game_h  = 2 * _SLOT_H + _GAME_GAP
 
-    # Championship game (index 2 if present)
+    # Labels row (fixed-width cells align labels above each card)
+    labels_row = (
+        f'<div style="display:flex;align-items:center;margin-bottom:4px;">'
+        f'<div style="width:{ff_w}px;text-align:center;font-size:10px;font-weight:800;'
+        f'color:#121213;text-transform:uppercase;letter-spacing:.06em;">Final Four</div>'
+        f'<div style="width:{h_cw}px;"></div>'
+        f'<div style="width:{champ_w}px;text-align:center;font-size:10px;font-weight:800;'
+        f'color:#121213;text-transform:uppercase;letter-spacing:.06em;">Championship</div>'
+        f'<div style="width:{h_cw}px;"></div>'
+        f'<div style="width:{ff_w}px;text-align:center;font-size:10px;font-weight:800;'
+        f'color:#121213;text-transform:uppercase;letter-spacing:.06em;">Final Four</div>'
+        f'</div>'
+    )
+
+    # Horizontal connector — a short SVG line at mid-height of the card
+    h_conn = (
+        f'<svg width="{h_cw}" height="{game_h}" style="flex-shrink:0;" '
+        f'viewBox="0 0 {h_cw} {game_h}" preserveAspectRatio="none" aria-hidden>'
+        f'<line x1="0" y1="{game_h / 2:.1f}" x2="{h_cw}" y2="{game_h / 2:.1f}" '
+        f'stroke="{_STROKE}" stroke-width="{_STROKE_W}"/>'
+        f'</svg>'
+    )
+
+    # FF cards
+    ff_left_card  = _b_game_card(f4_games[0], ff_w) if len(f4_games) >= 1 else (
+        f'<div style="width:{ff_w}px;height:{game_h}px;"></div>')
+    ff_right_card = _b_game_card(f4_games[1], ff_w) if len(f4_games) >= 2 else (
+        f'<div style="width:{ff_w}px;height:{game_h}px;"></div>')
+
+    # Championship card (or fallback placeholder)
     if len(f4_games) >= 3:
-        center_html += _f4_game_html(f4_games[2], 'Championship')
-        # Winner callout below the game
-        center_html += (
-            f'<div style="text-align:center;padding:4px 0;">'
-            f'<span style="font-size:11px;font-weight:700;color:#ffd700;">🏆 {champ_name}</span>'
-            f'<span style="font-size:9px;color:#5aadff;padding-left:6px;">#{champ_seed} · {champ_pct:.1f}% champ</span>'
+        champ_card = _b_game_card(f4_games[2], champ_w)
+    else:
+        champ_card = (
+            f'<div style="width:{champ_w}px;border:1px solid #d8dade;border-radius:6px;'
+            f'background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:10px;text-align:center;">'
+            f'<div style="font-size:13px;font-weight:700;">🏆 {champ_name}</div>'
+            f'<div style="font-size:10px;color:#555;">#{champ_seed} seed · {champ_pct:.1f}%</div>'
             f'</div>'
         )
-    else:
-        # Fallback: no championship game data, show plain box
-        center_html += (
-            f'<div style="margin:8px 0;text-align:center;">'
-            f'<div style="font-size:9px;color:#445;text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px;">Championship</div>'
-            f'<div style="background:#1a3045;border:1px solid #2d5a87;border-radius:4px;padding:6px 10px;min-width:{cw}px;">'
-            f'<div style="font-size:13px;font-weight:700;color:#ffd700;">🏆 {champ_name}</div>'
-            f'<div style="font-size:10px;color:#5aadff;">#{champ_seed} seed · {champ_pct:.1f}%</div>'
-            f'</div></div>'
-        )
 
-    if len(f4_games) >= 2:
-        center_html += _f4_game_html(f4_games[1], 'Final Four')
-    center_html += '</div>'
+    cards_row = (
+        f'<div style="display:flex;align-items:center;">'
+        + ff_left_card + h_conn + champ_card + h_conn + ff_right_card +
+        f'</div>'
+    )
 
-    east_mw  = bracket_vis.get('East',    [[]] * 4)
-    west_mw  = bracket_vis.get('Midwest', [[]] * 4)
-    south    = bracket_vis.get('South',   [[]] * 4)
-    west     = bracket_vis.get('West',    [[]] * 4)
+    # Champion callout below championship card
+    champ_callout = (
+        f'<div style="text-align:center;margin-top:6px;">'
+        f'<span style="font-size:12px;font-weight:700;color:#1a1a1a;">🏆 {champ_name}</span>'
+        f'<span style="font-size:10px;color:#06c;padding-left:6px;">'
+        f'#{champ_seed} · {champ_pct:.1f}% to win</span>'
+        f'</div>'
+    )
 
-    left_html  = (f'<div>{_b_region(east_mw,  "East",    flip=False)}'
-                  f'<div style="height:8px;"></div>'
-                  f'{_b_region(west_mw,  "Midwest", flip=False)}</div>')
-    right_html = (f'<div>{_b_region(south,     "South",   flip=True)}'
-                  f'<div style="height:8px;"></div>'
-                  f'{_b_region(west,     "West",    flip=True)}</div>')
+    center_cluster = (
+        f'<div style="display:flex;flex-direction:column;align-items:center;padding:4px 0;">'
+        + labels_row + cards_row + champ_callout +
+        f'</div>'
+    )
 
-    # Left-aligned (not centered) so horizontal overflow is only to the right,
-    # making the bracket scrollable from R64 → Final Four on narrow screens.
-    bracket_row = (
-        f'<div style="display:inline-flex;align-items:center;">'
-        f'{left_html}{center_html}{right_html}'
+    # ── Region pairs ──
+    top_pair = (
+        f'<div style="display:flex;gap:24px;">'
+        + _b_region(east,    'East',    flip=False)
+        + _b_region(west,    'West',    flip=True)
+        + '</div>'
+    )
+    bottom_pair = (
+        f'<div style="display:flex;gap:24px;">'
+        + _b_region(south,   'South',   flip=False)
+        + _b_region(midwest, 'Midwest', flip=True)
+        + '</div>'
+    )
+
+    body = (
+        f'<div style="display:flex;flex-direction:column;align-items:center;gap:20px;">'
+        + top_pair + center_cluster + bottom_pair +
         f'</div>'
     )
 
     return (
-        '<!DOCTYPE html><html><body style="margin:0;padding:8px;'
-        'background:#080e17;font-family:-apple-system,BlinkMacSystemFont,sans-serif;'
-        'overflow-x:auto;white-space:nowrap;">'
-        + bracket_row +
+        '<!DOCTYPE html><html><body style="margin:0;padding:12px;'
+        'background:#ececec;font-family:-apple-system,BlinkMacSystemFont,sans-serif;'
+        'display:inline-block;">'
+        + body +
         '</body></html>'
     )
 
