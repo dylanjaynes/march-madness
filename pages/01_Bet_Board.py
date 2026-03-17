@@ -52,10 +52,14 @@ def _parse_utc(t) -> datetime:
 # ── Load live odds + project ──────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_bet_board(year: int):
-    from src.ingest.odds import get_latest_odds
+    from src.ingest.odds import fetch_current_games, poll_and_store_odds
     from src.utils.db import query_df
 
-    odds_df = get_latest_odds()
+    # Always fetch live odds first; fall back to DB cache if API is unavailable
+    odds_df = fetch_current_games()
+    if odds_df.empty:
+        from src.ingest.odds import get_latest_odds
+        odds_df = get_latest_odds()
     rows = []
 
     if odds_df.empty:
