@@ -33,17 +33,6 @@ with st.sidebar:
 
 
 # ── Load live odds + project ──────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def _get_seed_lookup(year: int) -> dict:
-    """Returns {team_name: seed} for the given year."""
-    from src.utils.db import query_df
-    df = query_df(
-        "SELECT team, seed FROM torvik_ratings WHERE year = ? AND seed IS NOT NULL",
-        params=[year],
-    )
-    return dict(zip(df["team"], df["seed"])) if not df.empty else {}
-
-
 @st.cache_data(ttl=300)
 def load_bet_board(year: int):
     from src.ingest.odds import get_latest_odds
@@ -93,7 +82,11 @@ def load_bet_board(year: int):
                 proj["game_date"] = str(game.get("game_date") or "")
                 rows.append(proj)
     else:
-        seed_lookup = _get_seed_lookup(year)
+        seed_df = query_df(
+            "SELECT team, seed FROM torvik_ratings WHERE year = ? AND seed IS NOT NULL",
+            params=[year],
+        )
+        seed_lookup = dict(zip(seed_df["team"], seed_df["seed"])) if not seed_df.empty else {}
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]
