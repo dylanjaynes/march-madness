@@ -11,6 +11,7 @@ from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly,
     bet_tier, season_label, data_as_of,
 )
+from src.utils.db import query_df
 
 st.set_page_config(page_title="Matchup Builder", page_icon="⚔️", layout="wide")
 st.title("⚔️ Matchup Builder")
@@ -20,14 +21,41 @@ season = season_label(current_year)
 data_note = data_as_of(current_year)
 st.caption(f"**{season} season** · {data_note}")
 
+
+@st.cache_data(ttl=3600)
+def load_teams(year):
+    df = query_df(
+        "SELECT DISTINCT team FROM torvik_ratings WHERE year=? ORDER BY team",
+        params=[year],
+    )
+    return df["team"].tolist() if not df.empty else []
+
+
 # ── Team input ────────────────────────────────────────────────────────────────
 with st.form("matchup_form"):
     st.subheader("Build a Matchup")
     col1, col2 = st.columns(2)
+
+    # Determine teams list using current_year as default; will be overridden
+    # by proj_year after the form is submitted, but for display we use current_year
+    teams_list = load_teams(current_year)
+    default_a = "Duke" if "Duke" in teams_list else (teams_list[0] if teams_list else "Duke")
+    default_b = "Houston" if "Houston" in teams_list else (teams_list[1] if len(teams_list) > 1 else "Houston")
+
     with col1:
-        team_a = st.text_input("Team A", value="Duke")
+        team_a = st.selectbox(
+            "Team A",
+            teams_list,
+            index=teams_list.index(default_a) if default_a in teams_list else 0,
+            key="matchup_team_a",
+        )
     with col2:
-        team_b = st.text_input("Team B", value="Houston")
+        team_b = st.selectbox(
+            "Team B",
+            teams_list,
+            index=teams_list.index(default_b) if default_b in teams_list else 0,
+            key="matchup_team_b",
+        )
 
     col3, col4, col5 = st.columns(3)
     with col3:

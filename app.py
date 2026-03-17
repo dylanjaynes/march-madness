@@ -5,7 +5,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 st.set_page_config(
-    page_title="March Madness Model",
+    page_title="Home | March Madness Model",
     page_icon="🏀",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -98,7 +98,7 @@ def main():
     col_title, col_badge = st.columns([4, 1])
     with col_title:
         st.title("March Madness Projection Model")
-        st.caption("XGBoost spread & total model trained on BartTorvik efficiency ratings")
+        st.caption("Hybrid Ridge+XGBoost spread model with isotonic calibration · BartTorvik efficiency ratings")
     with col_badge:
         st.metric("Season", season)
         st.caption(data_note)
@@ -126,36 +126,32 @@ def main():
 
     # Model performance summary
     st.subheader("Model Performance (Walk-Forward Backtest)")
-    try:
-        from src.model.backtest import run_backtest, generate_backtest_report
+    import json
+    from pathlib import Path
 
-        @st.cache_data(ttl=3600)
-        def load_backtest():
-            return run_backtest()
+    RESULTS_PATH = Path("data/processed/backtest_results.json")
 
-        with st.spinner("Loading backtest..."):
-            results = load_backtest()
+    def _load_backtest_summary():
+        if not RESULTS_PATH.exists():
+            return None
+        try:
+            with open(RESULTS_PATH) as f:
+                return json.load(f)
+        except Exception:
+            return None
 
-        report = generate_backtest_report(results)
-        total_row = report[report["Year"] == "TOTAL"].iloc[0]
-
+    bt = _load_backtest_summary()
+    if bt is None:
+        st.info("Run `python scripts/run_backtest.py` to generate backtest results.")
+    else:
+        computed_at = bt.get("computed_at", "unknown")
+        st.caption(f"Last computed: {computed_at}")
+        # Show 3-4 headline metrics
         m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            ats = total_row["True ATS (All)"]
-            st.metric("True ATS (w/ Lines)", ats,
-                      help="Actual margin vs. real Vegas closing spread. 2019 + 2021–2025 only.")
-        with m2:
-            st.metric("True ATS @ Edge≥3", total_row["True ATS (Edge≥3)"],
-                      total_row["ATS ROI (Edge≥3)"])
-        with m3:
-            st.metric("Spread RMSE", f"{total_row['Spread RMSE']} pts")
-        with m4:
-            st.metric("vs Market RMSE", f"{total_row['Market RMSE']} pts")
-
-        per_year = report[report["Year"] != "TOTAL"]
-        st.dataframe(per_year, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.warning(f"Backtest unavailable: {e}")
+        m1.metric("Spread RMSE", f"{bt.get('spread_rmse', 0):.2f} pts")
+        m2.metric("ATS Win % (competitive)", f"{bt.get('ats_pct_competitive', bt.get('ats_pct', 0)):.1f}%")
+        m3.metric("Sample Size", str(bt.get("n_games", bt.get("sample_size", "—"))))
+        m4.metric("O/U Win %", f"{bt.get('ou_pct', 0):.1f}%")
 
     st.divider()
 

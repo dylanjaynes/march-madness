@@ -326,9 +326,14 @@ with st.sidebar:
     if not displayable:
         displayable = [current_year]
 
+    # Default to most recent year that actually has data (not current year if empty)
+    years_with_data = [y for y, n in years_with_results.items() if n > 0]
+    default_year = years_with_data[0] if years_with_data else current_year
+
     selected_year = st.selectbox(
         "Tournament year",
         displayable,
+        index=displayable.index(default_year) if default_year in displayable else 0,
         format_func=lambda y: (
             f"{y} ({y-1}–{str(y)[2:]} season)"
             + (f" — {years_with_results.get(y, 0)} games" if years_with_results.get(y, 0) == 0 else "")

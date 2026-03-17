@@ -3,8 +3,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import streamlit as st
 import pandas as pd
+import datetime as _dt
 from datetime import datetime, timezone, timedelta
 import pytz
+from pathlib import Path
+
+_TOTAL_CAL_PATH = Path("models/total_model_calibrator.pkl")
+_total_calibrated = _TOTAL_CAL_PATH.exists()
 
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
 from src.model.predict import (
@@ -51,6 +56,14 @@ with st.sidebar:
         [1, 2, 3, 4, 5, 6],
         format_func=lambda r: ROUND_NAMES.get(r, f"R{r}"),
         help="R64 works best for most games.",
+    )
+    st.divider()
+    import datetime
+    today = datetime.date.today()
+    date_filter = st.sidebar.radio(
+        "Show games",
+        ["Today", "Tomorrow", "All upcoming"],
+        index=0,
     )
 
 
@@ -382,6 +395,15 @@ if hide_pass:
     view = view[view["tier_order"] < 3]
 if min_edge > 0:
     view = view[view["abs_edge"].notna() & (view["abs_edge"] >= min_edge)]
+# Date filter
+import datetime as _datetime_mod
+_today_str    = _datetime_mod.date.today().isoformat()
+_tomorrow_str = (_datetime_mod.date.today() + _datetime_mod.timedelta(days=1)).isoformat()
+if date_filter == "Today":
+    view = view[view["date_key"] == _today_str]
+elif date_filter == "Tomorrow":
+    view = view[view["date_key"] == _tomorrow_str]
+# "All upcoming" — no filter
 
 # ── Summary KPIs ──────────────────────────────────────────────────────────────
 strong = (df["tier_order"] == 0).sum()
@@ -479,7 +501,9 @@ for date, tab in zip(dates, date_tabs):
             edge_str  = f"+{row['abs_edge']:.1f}" if row["abs_edge"] is not None else "—"
 
             ou_str = ""
-            if row["total_edge"] is not None:
+            if not _total_calibrated:
+                ou_str = None  # suppress — will render caption instead
+            elif row["total_edge"] is not None:
                 direction = "Over" if row["total_edge"] > 0 else "Under"
                 ou_str = (f"O/U: model {row['model_total']} vs {row['mkt_total']} "
                           f"({direction} {abs(row['total_edge']):.1f})")
@@ -573,7 +597,9 @@ for date, tab in zip(dates, date_tabs):
                     unsafe_allow_html=True,
                 )
 
-            if ou_str:
+            if ou_str is None:
+                st.caption("O/U: model uncalibrated — retrain to enable")
+            elif ou_str:
                 st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
             st.divider()
 
@@ -596,7 +622,9 @@ for date, tab in zip(dates, date_tabs):
                 edge_str  = f"+{row['abs_edge']:.1f}" if row["abs_edge"] is not None else "—"
 
                 ou_str = ""
-                if row["total_edge"] is not None:
+                if not _total_calibrated:
+                    ou_str = None  # suppress — will render caption instead
+                elif row["total_edge"] is not None:
                     direction = "Over" if row["total_edge"] > 0 else "Under"
                     ou_str = (f"O/U: model {row['model_total']} vs {row['mkt_total']} "
                               f"({direction} {abs(row['total_edge']):.1f})")
@@ -607,7 +635,7 @@ for date, tab in zip(dates, date_tabs):
                     st.markdown(
                         f"<div style='padding:4px 0'>"
                         f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span><br>"
-                        f"<span style='color:#aaa;font-size:0.8rem'>{row['time']}</span>"
+                        f"<span style='color:#aaa;font-size:0.8rem'>{row['date_label']} · {row['time']}</span>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -682,7 +710,9 @@ for date, tab in zip(dates, date_tabs):
                         unsafe_allow_html=True,
                     )
 
-                if ou_str:
+                if ou_str is None:
+                    st.caption("O/U: model uncalibrated — retrain to enable")
+                elif ou_str:
                     st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
                 st.divider()
 

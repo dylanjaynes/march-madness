@@ -114,11 +114,16 @@ display_cols = {
 show_df = display_df[[c for c in display_cols if c in display_df.columns]].copy()
 show_df = show_df.rename(columns=display_cols)
 
-# Round numeric columns
-for col in ["Barthag", "Adj O", "Adj D", "Tempo", "eFG% O", "eFG% D",
-            "TO% O", "TO% D", "OR%", "3P% O", "2P% O", "SOS"]:
+# Round numeric columns to appropriate precision
+if "Barthag" in show_df.columns:
+    show_df["Barthag"] = show_df["Barthag"].round(3)
+for col in ["Adj O", "Adj D", "Tempo", "eFG% O", "eFG% D", "TO% O", "TO% D", "OR%", "3P% O", "2P% O"]:
     if col in show_df.columns:
-        show_df[col] = show_df[col].round(2)
+        show_df[col] = show_df[col].round(1)
+if "SOS" in show_df.columns:
+    show_df["SOS"] = show_df["SOS"].round(2)
+if "Seed" in show_df.columns:
+    show_df["Seed"] = show_df["Seed"].where(show_df["Seed"].isna(), show_df["Seed"].astype("Int64"))
 
 # Highlight tournament teams
 def highlight_tourney(row):
@@ -133,6 +138,7 @@ st.dataframe(
     height=500,
 )
 st.caption("Green highlight = tournament team. Sorted by Barthag (overall efficiency) descending.")
+st.caption("Tournament Teams count reflects seeds stored in DB. Use Bracket Projector → Save to DB to populate seeds.")
 
 st.divider()
 

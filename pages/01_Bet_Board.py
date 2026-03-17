@@ -130,14 +130,15 @@ for _, row in df.iterrows():
     else:
         direction = None
 
+    is_mismatch = row.get("is_mismatch", False)
     rows_enriched.append({
         "Game": f"{row['team_a']} vs {row['team_b']}",
         "Round": row.get("round_name", ROUND_NAMES.get(row.get("round_num"), "?")),
         "Date": str(row.get("game_date", ""))[:10],
-        "Model Spread": ps,
-        "Market Spread": mkt,
+        "Model Spread": round(float(ps), 1) if ps is not None else None,
+        "Market Spread": round(float(mkt), 1) if mkt is not None else None,
         "Edge (pts)": round(float(spread_edge), 1) if spread_edge is not None else None,
-        "Cov Prob": round(cov_prob * 100, 1) if cov_prob is not None else None,
+        "Cov Prob": min(round(float(cov_prob) * 100, 1), 95.0) if cov_prob is not None else None,
         "Half Kelly %": round(hk * 100, 1) if hk is not None else None,
         "Bet ($)": int(bet_size),
         "Tier": f"{tier_emoji} {tier_label}",
@@ -149,26 +150,36 @@ for _, row in df.iterrows():
         "Win Prob A": f"{row.get('win_prob_a', 0):.1%}" if row.get("win_prob_a") is not None else None,
         "team_a": row["team_a"],
         "team_b": row["team_b"],
+        "is_mismatch": is_mismatch,
     })
 
 edf = pd.DataFrame(rows_enriched)
 
-# ── Filter ────────────────────────────────────────────────────────────────────
+# ── Split mismatch vs competitive ─────────────────────────────────────────────
+competitive_df = edf[edf["is_mismatch"] == False].copy()
+mismatch_df = edf[edf["is_mismatch"] == True].copy()
+
+# ── Filter (apply only to competitive) ───────────────────────────────────────
 if not show_passes:
-    edf = edf[edf["_tier_order"] < 3]
+    competitive_df = competitive_df[competitive_df["_tier_order"] < 3]
 
 if min_edge > 0:
-    edf = edf[edf["Edge (pts)"].abs() >= min_edge]
+    competitive_df = competitive_df[competitive_df["Edge (pts)"].abs() >= min_edge]
 
-edf = edf.sort_values(["_tier_order", "Edge (pts)"],
-                       key=lambda s: s if s.name != "Edge (pts)" else s.abs(),
-                       ascending=[True, False])
+competitive_df = competitive_df.sort_values(
+    ["_tier_order", "Edge (pts)"],
+    key=lambda s: s if s.name != "Edge (pts)" else s.abs(),
+    ascending=[True, False],
+)
+
+# Keep edf alias pointing at competitive for legacy references below
+edf = competitive_df
 
 # ── Summary row ───────────────────────────────────────────────────────────────
-strong = (edf["_tier_order"] == 0).sum()
-value = (edf["_tier_order"] == 1).sum()
-lean = (edf["_tier_order"] == 2).sum()
-total_allocated = edf["Bet ($)"].sum()
+strong = (competitive_df["_tier_order"] == 0).sum()
+value = (competitive_df["_tier_order"] == 1).sum()
+lean = (competitive_df["_tier_order"] == 2).sum()
+total_allocated = competitive_df["Bet ($)"].sum()
 
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("🔥 Strong Bets", strong)
@@ -207,10 +218,11 @@ st.dataframe(
 st.divider()
 
 # ── Edge distribution chart ───────────────────────────────────────────────────
-if not edf.empty and edf["Edge (pts)"].notna().any():
+if not competitive_df.empty and competitive_df["Edge (pts)"].notna().any():
     st.subheader("Edge Distribution")
+    chart_df = competitive_df[competitive_df["Edge (pts)"].notna()].sort_values("Edge (pts)", ascending=False)
     fig = px.bar(
-        edf[edf["Edge (pts)"].notna()].sort_values("Edge (pts)", ascending=False),
+        chart_df,
         x="Game",
         y="Edge (pts)",
         color="Tier",
@@ -234,6 +246,13 @@ if not totals_df.empty:
         use_container_width=True,
         hide_index=True,
     )
+
+with st.expander("⚠️ Mismatch Games (model edge unreliable)", expanded=False):
+    st.caption("These games have seed_diff ≥ 5 or barthag_diff ≥ 0.3. The model's edge on these games reflects mean-regression artifacts, not real signal.")
+    if not mismatch_df.empty:
+        st.dataframe(mismatch_df.drop(columns=["is_mismatch"], errors="ignore"), use_container_width=True)
+    else:
+        st.info("No mismatch games today.")
 
 st.divider()
 st.caption(

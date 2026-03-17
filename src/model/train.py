@@ -1,3 +1,4 @@
+# TODO: retrain models
 import copy
 import pickle
 import numpy as np
@@ -53,6 +54,13 @@ def train_total_model(X: pd.DataFrame, y: pd.Series) -> xgb.XGBRegressor:
     print(f"  Total model CV RMSE (temporal): {cv_rmse:.3f} pts (±{scores.std():.3f})")
 
     model.fit(X, y)
+
+    # Fit isotonic calibrator on OOF predictions and save
+    cal = _oof_calibrator(xgb.XGBRegressor(**TOTAL_MODEL_PARAMS), X, y)
+    cal_path = MODELS_DIR / "total_model_calibrator.pkl"
+    with open(cal_path, "wb") as f:
+        pickle.dump(cal, f)
+    print(f"  Total model calibrator saved to {cal_path}")
 
     model_path = MODELS_DIR / "total_model.pkl"
     with open(model_path, "wb") as f:

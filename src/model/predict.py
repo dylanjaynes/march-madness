@@ -2,13 +2,16 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from src.utils.config import SPREAD_STD_DEV, TOURNAMENT_YEARS, ROUND_NAMES
+from src.utils.config import (
+    SPREAD_STD_DEV, TOURNAMENT_YEARS, ROUND_NAMES,
+    COMPETITIVE_COVERAGE_STD, MISMATCH_COVERAGE_STD,
+)
 
-COVERAGE_STD = 12.0  # residual std from walk-forward backtest RMSE
+# COVERAGE_STD = 12.0  # legacy single-std constant (replaced by COMPETITIVE/MISMATCH below)
 
 
 def coverage_probability(model_spread: float, market_spread: float,
-                          residual_std: float = COVERAGE_STD) -> float:
+                          residual_std: float = COMPETITIVE_COVERAGE_STD) -> float:
     """Probability the bet covers. Models actual_margin ~ N(model_spread, residual_std)."""
     if model_spread >= market_spread:
         return float(1 - norm.cdf(market_spread, loc=model_spread, scale=residual_std))
@@ -174,12 +177,27 @@ def project_game(team_a: str, team_b: str,
         projected_spread = float(spread_model.predict(X)[0])
 
     projected_total_raw = float(total_model.predict(X)[0])
+
+    # Apply isotonic calibration for total model if available
+    try:
+        import pickle
+        from pathlib import Path
+        _cal_path = Path("models/total_model_calibrator.pkl")
+        if _cal_path.exists():
+            with open(_cal_path, "rb") as _f:
+                _total_cal = pickle.load(_f)
+            projected_total_raw = float(_total_cal.predict([projected_total_raw])[0])
+    except Exception:
+        pass  # calibrator not yet trained, use raw prediction
+
     projected_total = apply_tournament_pace_adjustment(projected_total_raw)
 
     projected_score_a = (projected_total + projected_spread) / 2
     projected_score_b = (projected_total - projected_spread) / 2
 
     win_prob_a = spread_to_win_prob(projected_spread)
+
+    cov_std = MISMATCH_COVERAGE_STD if is_mismatch else COMPETITIVE_COVERAGE_STD
 
     return {
         "team_a": team_a,
@@ -195,6 +213,7 @@ def project_game(team_a: str, team_b: str,
         "win_prob_a": win_prob_a,
         "win_prob_b": 1 - win_prob_a,
         "is_mismatch": is_mismatch,
+        "cov_std": cov_std,
     }
 
 

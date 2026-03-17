@@ -55,8 +55,8 @@ def build_matchup_features(team_a: str, team_b: str,
     rb = apply_neutral_site_correction(rb)
 
     # Rest days
-    rest_a = get_rest_days(team_a, game_date, year) if game_date else 7
-    rest_b = get_rest_days(team_b, game_date, year) if game_date else 7
+    rest_a = get_rest_days(team_a, game_date, year, round_num=round_num) if game_date else 7
+    rest_b = get_rest_days(team_b, game_date, year, round_num=round_num) if game_date else 7
 
     # Seed differential
     sa = seed_a if seed_a is not None else (ra.get("seed") or 8)
@@ -88,7 +88,7 @@ def build_matchup_features(team_a: str, team_b: str,
         "conf_power_b": _conf_power(rb.get("conf", "")),
         "days_rest_diff": rest_a - rest_b,
         "round_number": round_num,
-        "seed_diff": sa - sb,  # positive = team_a is higher seed number (underdog perspective)
+        "seed_diff": sa - sb,  # negative = team_a is the bigger favorite (team_a has lower seed number)
     }
 
     return pd.Series(features)

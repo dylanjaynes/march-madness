@@ -156,7 +156,7 @@ with _col_save:
             st.error(f"Save failed: {e}")
 
 with _col_proj:
-    if st.button("📡 Projected", use_container_width=True,
+    if st.button("📡 Load Model Picks", use_container_width=True,
                  help="Load pre-Selection Sunday bracket projections from CBS Sports (bracketology). "
                       "Now that the official bracket is released, use '🔄 Fetch SR' instead."):
         with st.spinner("Fetching CBS Sports Bracketology..."):
@@ -291,7 +291,7 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
     tc = "#1a1a1a" if is_winner else "#8a8c8d"
     fw = "600"    if is_winner else "400"
     pc = "#06c"   if is_winner else "#b0b2b4"
-    nm = (team[:12] + "…") if len(team) > 13 else team
+    nm = (team[:14] + "…") if len(team) > 15 else team
 
     seed_span = (
         f'<span style="font-size:9px;color:#555;background:#f2f4f6;border-radius:3px;'
@@ -300,7 +300,7 @@ def _b_slot(team: str, seed: int, prob: float, is_winner: bool,
     )
     name_span = (
         f'<span style="flex:1;font-size:10px;color:{tc};font-weight:{fw};'
-        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{nm}</span>'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{team}">{nm}</span>'
     )
     if spread is not None:
         sp_rounded = round(spread * 2) / 2

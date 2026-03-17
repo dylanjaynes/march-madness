@@ -22,45 +22,45 @@ st.caption(
 )
 
 RESULTS_PATH = Path("data/processed/backtest_results.json")
-PREDS_PATH = Path("data/processed/backtest_predictions.csv")
+PREDS_PATH   = Path("data/processed/backtest_predictions.csv")
 
 
 @st.cache_data(ttl=86400)
 def load_precomputed_backtest():
-    if not RESULTS_PATH.exists() or not PREDS_PATH.exists():
+    if not RESULTS_PATH.exists():
         return None, None
-
     with open(RESULTS_PATH) as f:
         results = json.load(f)
-
-    # JSON keys are always strings; convert per_year keys back to ints
+    preds_df = pd.read_csv(PREDS_PATH) if PREDS_PATH.exists() else pd.DataFrame()
+    # Convert JSON lists back to tuples for ATS/OU records
+    for key in ["ats_record_all", "ats_record_edge_3", "ats_record_edge_5",
+                "ou_record_all", "ou_record_edge_3"]:
+        if key in results and isinstance(results[key], list):
+            results[key] = tuple(results[key])
     if "per_year" in results:
+        # JSON keys are always strings; convert back to ints
         results["per_year"] = {int(k): v for k, v in results["per_year"].items()}
-
-    preds_df = pd.read_csv(PREDS_PATH)
+        for yr_data in results["per_year"].values():
+            for key in ["ats_record_all", "ats_record_edge_2", "ats_record_edge_3",
+                        "ats_record_edge_5", "ou_record_all", "ou_record_edge_2",
+                        "ou_record_edge_3"]:
+                if key in yr_data and isinstance(yr_data[key], list):
+                    yr_data[key] = tuple(yr_data[key])
     results["predictions_df"] = preds_df
-
-    computed_at = results.get("computed_at")
-    return results, computed_at
+    return results, preds_df
 
 
-results, computed_at = load_precomputed_backtest()
+results, preds_df = load_precomputed_backtest()
 
 if results is None:
-    st.error(
-        "Backtest results not found. "
-        "Run `scripts/run_backtest.py` locally to generate them."
+    st.warning(
+        "No precomputed backtest found. Run `python scripts/run_backtest.py` "
+        "locally to generate results, then commit `data/processed/backtest_results.json` "
+        "and `data/processed/backtest_predictions.csv`."
     )
-    st.code("python scripts/run_backtest.py", language="bash")
     st.stop()
-
-if computed_at:
-    try:
-        from datetime import datetime
-        dt = datetime.fromisoformat(computed_at)
-        st.caption(f"Last computed: {dt.strftime('%b %d, %Y at %I:%M %p')}")
-    except Exception:
-        st.caption(f"Last computed: {computed_at}")
+computed_at = results.get("computed_at", "unknown")
+st.caption(f"Last computed: {computed_at}")
 
 preds_df: pd.DataFrame = results.get("predictions_df", pd.DataFrame())
 per_year = results.get("per_year", {})

@@ -89,6 +89,9 @@ MISMATCH_MODEL_PARAMS = {"alpha": 1.0}
 NEUTRAL_SITE_ADJUSTMENT = 0
 TOURNAMENT_PACE_HAIRCUT = -2.5
 SPREAD_STD_DEV = 12.0  # Residual std for win probability — matches walk-forward backtest RMSE
+# COVERAGE_STD = 12.0  # legacy single-std constant (replaced by two-tier below)
+COMPETITIVE_COVERAGE_STD = 10.5   # competitive games are more predictable
+MISMATCH_COVERAGE_STD = 16.0      # blowout games are highly variable
 
 # Conference power conferences
 POWER_CONFERENCES = {"ACC", "Big Ten", "SEC", "Big 12", "Big East", "Pac-12"}
