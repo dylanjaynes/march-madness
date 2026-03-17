@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, COMPETITIVE_SPREAD_THRESHOLD
 from src.model.predict import (
@@ -35,6 +35,8 @@ with st.sidebar:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+_EDT = timezone(timedelta(hours=-4))  # Eastern Daylight Time (UTC-4, in effect during March tournament)
+
 def _parse_utc(t) -> datetime:
     """Parse ISO-8601 string to UTC-aware datetime. Returns epoch if invalid."""
     if not t:
@@ -47,6 +49,17 @@ def _parse_utc(t) -> datetime:
         return dt
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _fmt_et(t) -> str:
+    """Format UTC ISO timestamp as Eastern time string like 'Mar 20 7:10p'."""
+    dt = _parse_utc(t)
+    if dt == datetime.min.replace(tzinfo=timezone.utc):
+        return ""
+    et = dt.astimezone(_EDT)
+    hour = et.hour % 12 or 12
+    ampm = "p" if et.hour >= 12 else "a"
+    return et.strftime(f"%b %-d {hour}:%M{ampm} ET")
 
 
 # ── Load live odds + project ──────────────────────────────────────────────────
@@ -116,8 +129,16 @@ def load_bet_board(year: int):
                 if row["team"] not in seed_lookup:
                     seed_lookup[row["team"]] = row["seed"]
 
-        # Build set of NCAA tournament teams for NIT detection
-        ncaa_teams = set(tb_df["team"].str.strip().str.lower().tolist()) if not tb_df.empty else set()
+        # Build set of NCAA tournament teams for NIT detection.
+        # Include both the raw bracket name and its Odds-API-normalized form
+        # (e.g. "Virginia Commonwealth" → "VCU", "Central Florida" → "UCF").
+        from src.utils.team_map import normalize_team_name, is_known_team as _is_known
+        ncaa_teams = set()
+        if not tb_df.empty:
+            for team in tb_df["team"]:
+                ncaa_teams.add(team.strip().lower())
+                normed = normalize_team_name(team) if _is_known(team) else team
+                ncaa_teams.add(normed.strip().lower())
 
         # ── Filter to upcoming games only ─────────────────────────────────────
         now_utc = datetime.now(timezone.utc)
@@ -159,6 +180,7 @@ def load_bet_board(year: int):
                 proj["spread_edge"] = (proj["projected_spread"] - mkt_spread) if mkt_spread is not None else None
                 proj["total_edge"] = (proj["projected_total"] - mkt_total) if mkt_total is not None else None
                 proj["game_date"] = odds.get("commence_time", "")
+                proj["game_date_et"] = _fmt_et(odds.get("commence_time", ""))
                 proj["is_nit"] = is_nit
                 rows.append(proj)
 
@@ -225,7 +247,7 @@ for _, row in df.iterrows():
         "Game": f"{row['team_a']} vs {row['team_b']}",
         "Pick": pick_str,
         "Round": row.get("round_name", ROUND_NAMES.get(row.get("round_num"), "?")),
-        "Date": str(row.get("game_date", ""))[:10],
+        "Date": row.get("game_date_et") or str(row.get("game_date", ""))[:10],
         "Model Spread": round(float(ps), 1) if ps is not None else None,
         "Market Spread": round(float(mkt), 1) if mkt is not None else None,
         "Edge (pts)": round(float(spread_edge), 1) if spread_edge is not None else None,

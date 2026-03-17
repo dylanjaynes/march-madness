@@ -612,6 +612,12 @@ _ODDS_API_EXTRA: dict[str, str] = {
     "smu mustangs": "SMU",
     "unlv rebels": "UNLV",
     "miami hurricanes": "Miami FL",
+    # Tournament bracket long-form names → Odds API canonical
+    "maryland-baltimore county": "UMBC",
+    "maryland baltimore county": "UMBC",
+    "miami (florida)": "Miami FL",
+    "miami florida": "Miami FL",
+    "queens (nc)": "Queens",
     # Ivy League / SWAC / mid-major full names with mascots
     "cornell big red": "Cornell",
     "cornell": "Cornell",
