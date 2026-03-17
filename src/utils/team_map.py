@@ -726,6 +726,28 @@ _ODDS_API_EXTRA: dict[str, str] = {
     "n colorado bears": "Northern Colorado",
     "northern colorado bears": "Northern Colorado",
     "south carolina upstate spartans": "USC Upstate",
+    # NIT team name variants — Odds API "St" abbreviations
+    "alcorn st braves": "Alcorn State",
+    "alcorn state braves": "Alcorn State",
+    "youngstown st penguins": "Youngstown State",
+    "appalachian st mountaineers": "Appalachian State",
+    # NIT team name variants — ESPN full mascot names not yet in map
+    "youngstown state penguins": "Youngstown State",
+    "alcorn state braves": "Alcorn State",
+    "app state mountaineers": "Appalachian State",
+    "indiana state sycamores": "Indiana State",
+    "butler bulldogs": "Butler",
+    "missouri state bears": "Missouri State",
+    "nicholls colonels": "Nicholls State",
+    "nicholls st colonels": "Nicholls State",
+    "towson tigers": "Towson",
+    "north alabama lions": "North Alabama",
+    "saint francis red flash": "Saint Francis (PA)",
+    "southern miss golden eagles": "Southern Miss",
+    "morehead state eagles": "Morehead State",
+    "morehead st eagles": "Morehead State",
+    "san josé state spartans": "San José State",
+    "san jose state spartans": "San José State",
 }
 
 # Add new canonical entries for teams not in TEAM_ALIASES
@@ -780,6 +802,14 @@ _NEW_CANONICALS: dict[str, str] = {
     "Delaware State": "Delaware State",
     "Indiana State": "Indiana State",
     "North Carolina A&T": "North Carolina A&T",
+    # NIT canonicals not previously in map
+    "Youngstown State": "Youngstown State",
+    "Alcorn State": "Alcorn State",
+    "Missouri State": "Missouri State",
+    "Towson": "Towson",
+    "North Alabama": "North Alabama",
+    "Southern Miss": "Southern Miss",
+    "Morehead State": "Morehead State",
     # Ivy / mid-major canonicals
     "Cornell": "Cornell",
     "UMBC": "UMBC",

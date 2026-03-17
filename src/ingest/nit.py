@@ -208,7 +208,9 @@ def ingest_nit_lines(years=None) -> dict:
 
         stored = 0
         for game_date in unique_dates:
-            date_str = f"{game_date}T14:00:00Z"
+            # Use T00:00:00Z (midnight UTC) so we get pre-game odds for US
+            # evening games whose ESPN UTC date is one day ahead of local date.
+            date_str = f"{game_date}T00:00:00Z"
             games_api = fetch_odds_snapshot(date_str)
             if not games_api:
                 time.sleep(1)
