@@ -62,6 +62,9 @@ if results is None:
     st.stop()
 computed_at = results.get("computed_at", "unknown")
 st.caption(f"Last computed: {computed_at}")
+if st.button("🔄 Refresh cache", help="Force reload from latest JSON file"):
+    st.cache_data.clear()
+    st.rerun()
 
 preds_df: pd.DataFrame = results.get("predictions_df", pd.DataFrame())
 per_year = results.get("per_year", {})
