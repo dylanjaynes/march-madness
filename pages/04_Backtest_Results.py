@@ -62,6 +62,14 @@ if results is None:
     st.stop()
 computed_at = results.get("computed_at", "unknown")
 st.caption(f"Last computed: {computed_at}")
+st.warning(
+    "**Small sample caveat:** Results cover 6 tournament years (2019–2025), "
+    "375 lined games. 2024 alone went 44-16 (73%), which meaningfully inflates "
+    "the aggregate. The O/U results (52.5%) are the most trustworthy signal — "
+    "essentially coin-flip, which is expected. Treat ATS numbers as directional, "
+    "not as a guaranteed future win rate.",
+    icon="⚠️",
+)
 if st.button("🔄 Refresh cache", help="Force reload from latest JSON file"):
     st.cache_data.clear()
     st.rerun()

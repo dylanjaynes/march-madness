@@ -33,6 +33,17 @@ with st.sidebar:
 
 
 # ── Load live odds + project ──────────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def _get_seed_lookup(year: int) -> dict:
+    """Returns {team_name: seed} for the given year."""
+    from src.utils.db import query_df
+    df = query_df(
+        "SELECT team, seed FROM torvik_ratings WHERE year = ? AND seed IS NOT NULL",
+        params=[year],
+    )
+    return dict(zip(df["team"], df["seed"])) if not df.empty else {}
+
+
 @st.cache_data(ttl=300)
 def load_bet_board(year: int):
     from src.ingest.odds import get_latest_odds
@@ -82,21 +93,27 @@ def load_bet_board(year: int):
                 proj["game_date"] = str(game.get("game_date") or "")
                 rows.append(proj)
     else:
+        seed_lookup = _get_seed_lookup(year)
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]
             mkt_spread_raw = odds.get("spread_home")
             mkt_total = odds.get("total_line")
-            proj = project_game(home, away, round_num=1, year=year)
+            seed_home = seed_lookup.get(home)
+            seed_away = seed_lookup.get(away)
+            proj = project_game(home, away, round_num=1, year=year,
+                                seed_a=seed_home, seed_b=seed_away)
             if "error" not in proj:
                 # Convert spread_home (sportsbook: negative = home favored) to
                 # model convention (positive = team_a favored).
+                # If team_a IS home: negate (home fav -X → team_a fav +X)
+                # If team_a IS away: keep as-is (team_a away fav)
                 if mkt_spread_raw is not None:
                     try:
                         sh = float(mkt_spread_raw)
-                        team_a_name = str(proj.get("team_a") or "").strip().lower()
-                        home_name = str(home).strip().lower()
-                        mkt_spread = -sh if team_a_name == home_name else sh
+                        team_a = str(proj.get("team_a", "")).strip()
+                        home_clean = str(home).strip()
+                        mkt_spread = -sh if team_a.lower() == home_clean.lower() else sh
                     except (TypeError, ValueError):
                         mkt_spread = None
                 else:
@@ -153,9 +170,22 @@ for _, row in df.iterrows():
     else:
         direction = None
 
+    # Determine the model's recommended bet
+    if spread_edge is not None and mkt is not None:
+        if float(spread_edge) >= 0:
+            pick_team = row["team_a"]
+            pick_spread = -float(mkt)
+        else:
+            pick_team = row["team_b"]
+            pick_spread = float(mkt)
+        pick_str = f"{pick_team} {pick_spread:+.1f}"
+    else:
+        pick_str = "—"
+
     is_mismatch = row.get("is_mismatch", False)
     rows_enriched.append({
         "Game": f"{row['team_a']} vs {row['team_b']}",
+        "Pick": pick_str,
         "Round": row.get("round_name", ROUND_NAMES.get(row.get("round_num"), "?")),
         "Date": str(row.get("game_date", ""))[:10],
         "Model Spread": round(float(ps), 1) if ps is not None else None,
@@ -225,7 +255,7 @@ st.divider()
 
 # ── Main table ────────────────────────────────────────────────────────────────
 display_cols = [
-    "Tier", "Game", "Round", "Date",
+    "Tier", "Game", "Pick", "Round", "Date",
     "Model Spread", "Market Spread", "Edge (pts)",
     "Cov Prob", "Half Kelly %", "Bet ($)",
     "Win Prob A",
@@ -246,6 +276,16 @@ st.dataframe(
     show_df.style.applymap(tier_color, subset=["Tier"]),
     use_container_width=True,
     hide_index=True,
+    column_config={
+        "Pick": st.column_config.TextColumn(label="Model Pick", width="medium"),
+        "Model Spread": st.column_config.NumberColumn(format="%.1f"),
+        "Market Spread": st.column_config.NumberColumn(format="%.1f"),
+        "Edge (pts)": st.column_config.NumberColumn(format="%.1f"),
+        "Cov Prob": st.column_config.NumberColumn(label="Cov Prob", format="%.1f%%"),
+        "Half Kelly %": st.column_config.NumberColumn(format="%.1f%%"),
+        "Bet ($)": st.column_config.NumberColumn(format="$%d"),
+        "Win Prob A": st.column_config.TextColumn(label="Win Prob"),
+    },
 )
 
 st.divider()
