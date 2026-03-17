@@ -31,6 +31,9 @@ with st.sidebar:
     show_passes = st.checkbox("Show Pass-tier bets", value=False)
     show_nit = st.checkbox("Show NIT games", value=True)
     st.divider()
+    if st.button("🔄 Refresh odds & projections"):
+        load_bet_board.clear()
+        st.rerun()
     st.caption("Half Kelly is recommended to reduce variance.")
 
 
@@ -63,7 +66,7 @@ def _fmt_et(t) -> str:
 
 
 # ── Load live odds + project ──────────────────────────────────────────────────
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=120)
 def load_bet_board(year: int):
     from src.ingest.odds import fetch_current_games, poll_and_store_odds
     from src.utils.db import query_df
