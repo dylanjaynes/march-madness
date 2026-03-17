@@ -526,8 +526,8 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
     """Build the complete bracket HTML — leerob-inspired light theme.
 
     Layout (vertical stack):
-        Top pair:    East (left) + West (right)   — E8s face each other
-        Center:      [FF East/West] ─ [Championship] ─ [FF South/Midwest]
+        Top pair:    East (left) + West (right)     — E8s face each other
+        Center:      [FF East/South] ─ [Championship] ─ [FF West/Midwest]
         Bottom pair: South (left) + Midwest (right) — E8s face each other
     """
     east    = bracket_vis.get('East',    [[]] * 4)
@@ -878,10 +878,10 @@ def _project_game_row(ta, sa, tb, sb, round_num, label, round_name):
 
 def simulate_final_four(region_winners: dict, deterministic: bool = True,
                         use_cache: bool = False, chaos: int = 0):
-    """East vs West, South vs Midwest in F4."""
+    """East vs South, West vs Midwest in F4 (official NCAA bracket pairing)."""
     matchups = [
-        (region_winners["East"], region_winners["West"], "East vs West"),
-        (region_winners["South"], region_winners["Midwest"], "South vs Midwest"),
+        (region_winners["East"], region_winners["South"], "East vs South"),
+        (region_winners["West"], region_winners["Midwest"], "West vs Midwest"),
     ]
     f4_winners = []
     games = []
@@ -992,7 +992,7 @@ if run_btn:
 
     # Build F4 games data for center display using last sim's actual region winners
     f4_display_games = []
-    for region_pair in [('East', 'West'), ('South', 'Midwest')]:
+    for region_pair in [('East', 'South'), ('West', 'Midwest')]:
         ra, rb = region_pair
         ta, sa = region_winners_det[ra]
         tb, sb = region_winners_det[rb]
