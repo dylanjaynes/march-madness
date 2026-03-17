@@ -1047,8 +1047,18 @@ if run_btn:
             'winner': champ_winner_side,
         })
 
+    # Derive the displayed champion from the actual championship game winner —
+    # NOT from champ_candidate (which is the last MC sim's champion and may
+    # differ from the display game's random outcome).
+    if len(f4_display_games) >= 3:
+        _cg = f4_display_games[2]
+        _cw = _cg['a'] if _cg['winner'] == 'a' else _cg['b']
+        display_champion = (_cw['team'], _cw['seed'])
+    else:
+        display_champion = champ_candidate
+
     bracket_html = _build_full_bracket_html(
-        bracket_vis, f4_display_games, champ_candidate,
+        bracket_vis, f4_display_games, display_champion,
         champion_counts, n_sims,
     )
 
