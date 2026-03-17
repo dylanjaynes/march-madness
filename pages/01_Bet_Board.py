@@ -132,13 +132,22 @@ def load_bet_board(year: int):
         # Build set of NCAA tournament teams for NIT detection.
         # Include both the raw bracket name and its Odds-API-normalized form
         # (e.g. "Virginia Commonwealth" → "VCU", "Central Florida" → "UCF").
+        # Also include First Four teams (not yet in bracket table since they
+        # compete for 4 open seed slots).
         from src.utils.team_map import normalize_team_name, is_known_team as _is_known
+        from src.ingest.bracket import fetch_first_four_teams
         ncaa_teams = set()
         if not tb_df.empty:
             for team in tb_df["team"]:
                 ncaa_teams.add(team.strip().lower())
                 normed = normalize_team_name(team) if _is_known(team) else team
                 ncaa_teams.add(normed.strip().lower())
+        # Add First Four participants (fetched from ESPN, cached via st.cache_data)
+        try:
+            ff_teams = fetch_first_four_teams(year)
+            ncaa_teams.update(ff_teams)
+        except Exception:
+            pass
 
         # ── Filter to upcoming games only ─────────────────────────────────────
         now_utc = datetime.now(timezone.utc)

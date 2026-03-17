@@ -328,6 +328,59 @@ def load_bracket_from_db(year: int) -> dict:
     return bracket
 
 
+ESPN_SCOREBOARD = (
+    "https://site.api.espn.com/apis/site/v2/sports/"
+    "basketball/mens-college-basketball/scoreboard"
+)
+_ESPN_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+def fetch_first_four_teams(year: int) -> set:
+    """
+    Query ESPN scoreboard for First Four games (the ~3 days before R64 starts)
+    and return a set of normalized team names for those games.
+    Used to detect NCAA games where neither team is yet in tournament_bracket.
+    """
+    from datetime import date, timedelta
+    from src.utils.config import SELECTION_SUNDAY
+
+    # First Four is ~4 days starting ~3 days after Selection Sunday
+    sel_str = SELECTION_SUNDAY.get(year)
+    if sel_str:
+        mm, dd = int(sel_str[:2]), int(sel_str[2:])
+        sel_date = date(year, mm, dd)
+    else:
+        # Rough fallback: second Sunday of March
+        sel_date = date(year, 3, 15)
+
+    teams: set = set()
+    for delta in range(1, 5):  # 4 days after Selection Sunday
+        d = sel_date + timedelta(days=delta)
+        date_str = d.strftime("%Y%m%d")
+        try:
+            resp = requests.get(
+                ESPN_SCOREBOARD,
+                params={"dates": date_str, "limit": 100},
+                headers=_ESPN_HEADERS,
+                timeout=10,
+            )
+            data = resp.json()
+        except Exception:
+            continue
+        for event in data.get("events", []):
+            comp = event.get("competitions", [{}])[0]
+            note_text = " ".join(n.get("headline", "") for n in comp.get("notes", []))
+            if "First Four" not in note_text:
+                continue
+            for competitor in comp.get("competitors", []):
+                raw = competitor.get("team", {}).get("displayName", "")
+                if raw:
+                    normed = normalize_team_name(raw) if is_known_team(raw) else raw
+                    teams.add(normed.strip().lower())
+                    teams.add(raw.strip().lower())
+    return teams
+
+
 def get_bracket_status(year: int) -> dict:
     """Return metadata about the stored bracket."""
     df = query_df(
