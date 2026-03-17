@@ -1,53 +1,39 @@
 {
-  "spread_rmse": 11.566352244612125,
-  "total_rmse": 19.631277088133857,
-  "competitive_rmse": 11.557064445057296,
-  "mismatch_rmse": 11.572177005863955,
-  "vs_market_spread_rmse": null,
+  "spread_rmse": 11.58244818681338,
+  "total_rmse": 18.85774489956072,
+  "vs_market_spread_rmse": 11.817472939112942,
   "ats_record_all": [
-    0,
-    0,
-    0
+    240,
+    132,
+    3
   ],
   "ats_record_edge_3": [
-    0,
-    0,
-    0
+    109,
+    45,
+    2
   ],
   "ats_record_edge_5": [
-    0,
-    0,
-    0
+    50,
+    23,
+    1
   ],
-  "ats_roi_edge_3": 0.0,
-  "ats_record_competitive": [
-    0,
-    0,
-    0
-  ],
-  "ats_record_mismatch": [
-    0,
-    0,
-    0
-  ],
+  "ats_roi_edge_3": 35.12396694214876,
   "ou_record_all": [
-    0,
-    0,
+    197,
+    178,
     0
   ],
   "ou_record_edge_3": [
-    0,
-    0,
+    156,
+    131,
     0
   ],
-  "ou_roi_edge_3": 0.0,
+  "ou_roi_edge_3": 3.7694013303769403,
   "n_games_total": 957,
   "per_year": {
     "2009": {
-      "spread_rmse": 14.598629586463685,
-      "total_rmse": 20.918636101558743,
-      "competitive_rmse": 12.514823144901689,
-      "mismatch_rmse": 16.10424148229831,
+      "spread_rmse": 15.45667422684232,
+      "total_rmse": 17.266418026963095,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -70,16 +56,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -99,7 +75,7 @@
       "by_round": {
         "R64": {
           "n_games": 29,
-          "spread_rmse": 15.47709161406919,
+          "spread_rmse": 13.788858212789238,
           "ats_record": [
             0,
             0,
@@ -108,7 +84,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 10.840952661989391,
+          "spread_rmse": 15.575626921090562,
           "ats_record": [
             0,
             0,
@@ -117,7 +93,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 19.05666337307923,
+          "spread_rmse": 20.61379138406721,
           "ats_record": [
             0,
             0,
@@ -126,7 +102,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 12.560669096957586,
+          "spread_rmse": 15.02017516864482,
           "ats_record": [
             0,
             0,
@@ -135,7 +111,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 13.652016371965285,
+          "spread_rmse": 16.949246634179932,
           "ats_record": [
             0,
             0,
@@ -144,7 +120,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 7.142857142857142,
+          "spread_rmse": 7.916740417480469,
           "ats_record": [
             0,
             0,
@@ -153,18 +129,14 @@
         }
       },
       "n_games": 60,
-      "n_games_competitive": 27,
-      "n_games_mismatch": 33,
       "n_games_with_lines": 0,
       "train_years": [
         2008
       ]
     },
     "2010": {
-      "spread_rmse": 9.961652861573958,
-      "total_rmse": 24.237986222345768,
-      "competitive_rmse": 8.067648760434425,
-      "mismatch_rmse": 10.950013448447379,
+      "spread_rmse": 11.7694255899122,
+      "total_rmse": 23.112449317309224,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -187,16 +159,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -216,7 +178,7 @@
       "by_round": {
         "R64": {
           "n_games": 30,
-          "spread_rmse": 10.289728427359542,
+          "spread_rmse": 13.398546921407307,
           "ats_record": [
             0,
             0,
@@ -225,7 +187,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 11.043156417382585,
+          "spread_rmse": 10.482477323115472,
           "ats_record": [
             0,
             0,
@@ -234,7 +196,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 6.789053689580014,
+          "spread_rmse": 7.429704407331174,
           "ats_record": [
             0,
             0,
@@ -243,7 +205,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 8.06225774829855,
+          "spread_rmse": 6.060610006180636,
           "ats_record": [
             0,
             0,
@@ -252,7 +214,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 12.103718436910205,
+          "spread_rmse": 18.675259073758824,
           "ats_record": [
             0,
             0,
@@ -261,7 +223,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 2.0,
+          "spread_rmse": 4.458069324493408,
           "ats_record": [
             0,
             0,
@@ -270,8 +232,6 @@
         }
       },
       "n_games": 61,
-      "n_games_competitive": 23,
-      "n_games_mismatch": 38,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -279,10 +239,8 @@
       ]
     },
     "2011": {
-      "spread_rmse": 11.467462398026552,
-      "total_rmse": 22.454105177915615,
-      "competitive_rmse": 10.580915907216639,
-      "mismatch_rmse": 12.112218952378973,
+      "spread_rmse": 11.440044490075856,
+      "total_rmse": 20.914843402647133,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -305,16 +263,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -334,7 +282,7 @@
       "by_round": {
         "R64": {
           "n_games": 15,
-          "spread_rmse": 13.244555366947733,
+          "spread_rmse": 11.795844729394341,
           "ats_record": [
             0,
             0,
@@ -343,7 +291,7 @@
         },
         "R32": {
           "n_games": 8,
-          "spread_rmse": 10.589248602400792,
+          "spread_rmse": 11.34583056073992,
           "ats_record": [
             0,
             0,
@@ -352,7 +300,7 @@
         },
         "S16": {
           "n_games": 4,
-          "spread_rmse": 11.618174609529829,
+          "spread_rmse": 14.47132744709537,
           "ats_record": [
             0,
             0,
@@ -361,7 +309,7 @@
         },
         "E8": {
           "n_games": 2,
-          "spread_rmse": 7.3296991613516,
+          "spread_rmse": 7.2247450596483835,
           "ats_record": [
             0,
             0,
@@ -370,7 +318,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 4.015030114580419,
+          "spread_rmse": 7.759226145679473,
           "ats_record": [
             0,
             0,
@@ -379,7 +327,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 0.37037037037037024,
+          "spread_rmse": 2.924581401803305,
           "ats_record": [
             0,
             0,
@@ -388,8 +336,6 @@
         }
       },
       "n_games": 32,
-      "n_games_competitive": 14,
-      "n_games_mismatch": 18,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -398,10 +344,8 @@
       ]
     },
     "2012": {
-      "spread_rmse": 9.727768898520065,
-      "total_rmse": 20.63684332517904,
-      "competitive_rmse": 9.9869788779332,
-      "mismatch_rmse": 9.553401226929877,
+      "spread_rmse": 9.647018398836298,
+      "total_rmse": 18.29455518691626,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -424,16 +368,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -453,7 +387,7 @@
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 10.238345578835881,
+          "spread_rmse": 10.098042627260217,
           "ats_record": [
             0,
             0,
@@ -462,7 +396,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 9.232347891279232,
+          "spread_rmse": 10.713821843909468,
           "ats_record": [
             0,
             0,
@@ -471,7 +405,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 9.980762199477853,
+          "spread_rmse": 8.10130326991077,
           "ats_record": [
             0,
             0,
@@ -480,7 +414,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 9.58972823670731,
+          "spread_rmse": 5.494176833130529,
           "ats_record": [
             0,
             0,
@@ -489,7 +423,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 5.01152108033338,
+          "spread_rmse": 7.6643339382458615,
           "ats_record": [
             0,
             0,
@@ -498,7 +432,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 5.339622641509434,
+          "spread_rmse": 0.43050575256347656,
           "ats_record": [
             0,
             0,
@@ -507,8 +441,6 @@
         }
       },
       "n_games": 63,
-      "n_games_competitive": 25,
-      "n_games_mismatch": 38,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -518,10 +450,8 @@
       ]
     },
     "2013": {
-      "spread_rmse": 14.238146333211157,
-      "total_rmse": 16.906881054630542,
-      "competitive_rmse": 13.2141610327412,
-      "mismatch_rmse": 14.823603404510363,
+      "spread_rmse": 14.013190712888562,
+      "total_rmse": 16.04354880130128,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -544,16 +474,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -573,7 +493,7 @@
       "by_round": {
         "R64": {
           "n_games": 30,
-          "spread_rmse": 16.08300598929147,
+          "spread_rmse": 15.69533182666811,
           "ats_record": [
             0,
             0,
@@ -582,7 +502,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 12.73195700276302,
+          "spread_rmse": 11.83367940075085,
           "ats_record": [
             0,
             0,
@@ -591,7 +511,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 7.738538208318961,
+          "spread_rmse": 9.262612557782269,
           "ats_record": [
             0,
             0,
@@ -600,7 +520,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 18.40536615254914,
+          "spread_rmse": 18.82837767675284,
           "ats_record": [
             0,
             0,
@@ -609,7 +529,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 9.42113620342985,
+          "spread_rmse": 10.891176829354633,
           "ats_record": [
             0,
             0,
@@ -618,7 +538,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 1.0256410256410255,
+          "spread_rmse": 2.454996109008789,
           "ats_record": [
             0,
             0,
@@ -627,8 +547,6 @@
         }
       },
       "n_games": 61,
-      "n_games_competitive": 23,
-      "n_games_mismatch": 38,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -639,10 +557,8 @@
       ]
     },
     "2014": {
-      "spread_rmse": 11.17455728664043,
-      "total_rmse": 19.961422202980597,
-      "competitive_rmse": 12.209291010415127,
-      "mismatch_rmse": 10.559319376086002,
+      "spread_rmse": 11.349457000437374,
+      "total_rmse": 19.37499253515878,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -665,16 +581,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -694,7 +600,7 @@
       "by_round": {
         "R64": {
           "n_games": 28,
-          "spread_rmse": 11.166570724413177,
+          "spread_rmse": 11.082668304620933,
           "ats_record": [
             0,
             0,
@@ -703,7 +609,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 13.07057833253007,
+          "spread_rmse": 13.3374206089405,
           "ats_record": [
             0,
             0,
@@ -712,7 +618,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 8.024715334427919,
+          "spread_rmse": 9.192131718567218,
           "ats_record": [
             0,
             0,
@@ -721,7 +627,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 7.820686815450022,
+          "spread_rmse": 7.830964666838424,
           "ats_record": [
             0,
             0,
@@ -730,7 +636,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 13.622909894365602,
+          "spread_rmse": 13.674417279683764,
           "ats_record": [
             0,
             0,
@@ -739,7 +645,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 3.4,
+          "spread_rmse": 4.388501167297363,
           "ats_record": [
             0,
             0,
@@ -748,8 +654,6 @@
         }
       },
       "n_games": 59,
-      "n_games_competitive": 21,
-      "n_games_mismatch": 38,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -761,10 +665,8 @@
       ]
     },
     "2015": {
-      "spread_rmse": 10.338373211064585,
-      "total_rmse": 16.924185161650268,
-      "competitive_rmse": 11.036431766345187,
-      "mismatch_rmse": 9.765837327543945,
+      "spread_rmse": 10.12252764719517,
+      "total_rmse": 15.415441276914502,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -787,16 +689,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -816,7 +708,7 @@
       "by_round": {
         "R64": {
           "n_games": 31,
-          "spread_rmse": 9.74761695114993,
+          "spread_rmse": 9.969213327144043,
           "ats_record": [
             0,
             0,
@@ -825,7 +717,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 10.731981211580756,
+          "spread_rmse": 10.802542943243502,
           "ats_record": [
             0,
             0,
@@ -834,7 +726,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 13.520703505514591,
+          "spread_rmse": 10.880906588734629,
           "ats_record": [
             0,
             0,
@@ -843,7 +735,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 7.818924443837998,
+          "spread_rmse": 9.872199992035945,
           "ats_record": [
             0,
             0,
@@ -852,7 +744,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 7.867575917767031,
+          "spread_rmse": 5.778834591620624,
           "ats_record": [
             0,
             0,
@@ -861,7 +753,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 2.75,
+          "spread_rmse": 1.010091781616211,
           "ats_record": [
             0,
             0,
@@ -870,8 +762,6 @@
         }
       },
       "n_games": 62,
-      "n_games_competitive": 27,
-      "n_games_mismatch": 35,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -884,10 +774,8 @@
       ]
     },
     "2016": {
-      "spread_rmse": 13.046754378776455,
-      "total_rmse": 19.806371402819767,
-      "competitive_rmse": 13.91805449978563,
-      "mismatch_rmse": 12.56392870209148,
+      "spread_rmse": 12.637772028669211,
+      "total_rmse": 19.84340744778091,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -910,16 +798,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -939,7 +817,7 @@
       "by_round": {
         "R64": {
           "n_games": 28,
-          "spread_rmse": 12.754438756221914,
+          "spread_rmse": 11.86421129546987,
           "ats_record": [
             0,
             0,
@@ -948,7 +826,7 @@
         },
         "R32": {
           "n_games": 15,
-          "spread_rmse": 11.01677075964088,
+          "spread_rmse": 11.194188080319172,
           "ats_record": [
             0,
             0,
@@ -957,7 +835,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 11.84475926117298,
+          "spread_rmse": 12.589048755635561,
           "ats_record": [
             0,
             0,
@@ -966,7 +844,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 10.621081559822441,
+          "spread_rmse": 8.853610778354987,
           "ats_record": [
             0,
             0,
@@ -975,7 +853,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 30.867708130106738,
+          "spread_rmse": 30.240011436466496,
           "ats_record": [
             0,
             0,
@@ -984,7 +862,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 4.23404255319149,
+          "spread_rmse": 5.6675310134887695,
           "ats_record": [
             0,
             0,
@@ -993,8 +871,6 @@
         }
       },
       "n_games": 58,
-      "n_games_competitive": 20,
-      "n_games_mismatch": 38,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -1008,10 +884,8 @@
       ]
     },
     "2017": {
-      "spread_rmse": 10.608540564047596,
-      "total_rmse": 19.276431955303078,
-      "competitive_rmse": 12.46554117545143,
-      "mismatch_rmse": 9.282929148566238,
+      "spread_rmse": 10.683878016179195,
+      "total_rmse": 19.252684739494743,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -1034,16 +908,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -1063,7 +927,7 @@
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 9.022890259941727,
+          "spread_rmse": 8.92334114449359,
           "ats_record": [
             0,
             0,
@@ -1072,7 +936,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 11.302993277753666,
+          "spread_rmse": 11.19900930976942,
           "ats_record": [
             0,
             0,
@@ -1081,7 +945,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 14.684785168250144,
+          "spread_rmse": 14.905785220321922,
           "ats_record": [
             0,
             0,
@@ -1090,7 +954,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 12.43028101278008,
+          "spread_rmse": 12.971123489595033,
           "ats_record": [
             0,
             0,
@@ -1099,7 +963,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 4.026690735734494,
+          "spread_rmse": 8.3272682212677,
           "ats_record": [
             0,
             0,
@@ -1108,7 +972,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 8.071428571428571,
+          "spread_rmse": 6.876538336277008,
           "ats_record": [
             0,
             0,
@@ -1117,8 +981,6 @@
         }
       },
       "n_games": 63,
-      "n_games_competitive": 24,
-      "n_games_mismatch": 39,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -1133,10 +995,8 @@
       ]
     },
     "2018": {
-      "spread_rmse": 11.553089073201793,
-      "total_rmse": 20.28864758406134,
-      "competitive_rmse": 11.440255789023004,
-      "mismatch_rmse": 11.617471994241878,
+      "spread_rmse": 11.245237330981604,
+      "total_rmse": 19.977848042404684,
       "vs_market_spread_rmse": null,
       "ats_record_all": [
         0,
@@ -1159,16 +1019,6 @@
         0
       ],
       "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
       "ou_record_all": [
         0,
         0,
@@ -1188,7 +1038,7 @@
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 10.80969040518645,
+          "spread_rmse": 11.027045153221296,
           "ats_record": [
             0,
             0,
@@ -1197,7 +1047,7 @@
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 13.340398391931542,
+          "spread_rmse": 12.661179127116998,
           "ats_record": [
             0,
             0,
@@ -1206,7 +1056,7 @@
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 12.778532183228256,
+          "spread_rmse": 11.705947954858479,
           "ats_record": [
             0,
             0,
@@ -1215,7 +1065,7 @@
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 8.275025586240975,
+          "spread_rmse": 8.85122197497046,
           "ats_record": [
             0,
             0,
@@ -1224,7 +1074,7 @@
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 7.103307796542714,
+          "spread_rmse": 4.305750503736731,
           "ats_record": [
             0,
             0,
@@ -1233,7 +1083,7 @@
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 11.87719298245614,
+          "spread_rmse": 8.003005981445312,
           "ats_record": [
             0,
             0,
@@ -1242,8 +1092,6 @@
         }
       },
       "n_games": 63,
-      "n_games_competitive": 23,
-      "n_games_mismatch": 40,
       "n_games_with_lines": 0,
       "train_years": [
         2008,
@@ -1259,118 +1107,104 @@
       ]
     },
     "2019": {
-      "spread_rmse": 11.190637884402179,
-      "total_rmse": 16.756053680238406,
-      "competitive_rmse": 11.977313543194292,
-      "mismatch_rmse": 10.562250170805989,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 11.222521315843707,
+      "total_rmse": 16.989573940696534,
+      "vs_market_spread_rmse": 11.997188824159586,
       "ats_record_all": [
-        0,
-        0,
+        35,
+        28,
         0
       ],
       "ats_record_edge_2": [
-        0,
-        0,
+        19,
+        14,
         0
       ],
       "ats_record_edge_3": [
-        0,
-        0,
+        16,
+        10,
         0
       ],
       "ats_record_edge_5": [
-        0,
-        0,
+        8,
+        3,
         0
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 17.482517482517483,
       "ou_record_all": [
-        0,
-        0,
+        28,
+        35,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        26,
+        28,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        23,
+        28,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": -13.903743315508022,
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 12.164360413439947,
+          "spread_rmse": 12.214681514688591,
           "ats_record": [
-            0,
-            0,
+            17,
+            15,
             0
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 10.704336128711734,
+          "spread_rmse": 10.011315077333615,
           "ats_record": [
-            0,
-            0,
+            12,
+            4,
             0
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 11.149579626163163,
+          "spread_rmse": 11.683981905730862,
           "ats_record": [
-            0,
-            0,
+            3,
+            5,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 7.045691700025207,
+          "spread_rmse": 8.866982590987277,
           "ats_record": [
-            0,
-            0,
+            2,
+            2,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 6.0335326417419735,
+          "spread_rmse": 5.819561414223269,
           "ats_record": [
-            0,
-            0,
+            1,
+            1,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 7.430769230769231,
+          "spread_rmse": 9.066937804222107,
           "ats_record": [
             0,
-            0,
+            1,
             0
           ]
         }
       },
       "n_games": 63,
-      "n_games_competitive": 27,
-      "n_games_mismatch": 36,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 63,
       "train_years": [
         2008,
         2009,
@@ -1386,118 +1220,104 @@
       ]
     },
     "2021": {
-      "spread_rmse": 11.813502415252122,
-      "total_rmse": 19.04624713240205,
-      "competitive_rmse": 13.162225173169489,
-      "mismatch_rmse": 11.165779093476148,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 11.117330349421534,
+      "total_rmse": 18.937127028131165,
+      "vs_market_spread_rmse": 12.33422330412941,
       "ats_record_all": [
-        0,
-        0,
+        42,
+        20,
         0
       ],
       "ats_record_edge_2": [
-        0,
-        0,
+        21,
+        11,
         0
       ],
       "ats_record_edge_3": [
-        0,
-        0,
+        15,
+        8,
         0
       ],
       "ats_record_edge_5": [
-        0,
-        0,
+        8,
+        2,
         0
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 24.50592885375494,
       "ou_record_all": [
-        0,
-        0,
+        33,
+        29,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        23,
+        21,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        20,
+        21,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": -6.873614190687362,
       "by_round": {
         "R64": {
           "n_games": 31,
-          "spread_rmse": 10.580888567818844,
+          "spread_rmse": 9.588608457283705,
           "ats_record": [
-            0,
-            0,
+            23,
+            8,
             0
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 13.956720156745506,
+          "spread_rmse": 13.060384326421996,
           "ats_record": [
-            0,
-            0,
+            9,
+            7,
             0
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 11.740347048987102,
+          "spread_rmse": 12.230466895929663,
           "ats_record": [
-            0,
-            0,
+            6,
+            2,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 8.3798305144563,
+          "spread_rmse": 7.566174283410407,
           "ats_record": [
-            0,
-            0,
+            2,
+            2,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 12.713602355381113,
+          "spread_rmse": 11.848870188810837,
           "ats_record": [
-            0,
-            0,
+            1,
+            1,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 18.935483870967744,
+          "spread_rmse": 19.418448209762573,
           "ats_record": [
-            0,
+            1,
             0,
             0
           ]
         }
       },
       "n_games": 62,
-      "n_games_competitive": 19,
-      "n_games_mismatch": 43,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 62,
       "train_years": [
         2008,
         2009,
@@ -1514,118 +1334,104 @@
       ]
     },
     "2022": {
-      "spread_rmse": 11.497071308760669,
-      "total_rmse": 19.882042440165122,
-      "competitive_rmse": 11.28149360377578,
-      "mismatch_rmse": 11.595974550257225,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 11.134419251732604,
+      "total_rmse": 19.077075892321748,
+      "vs_market_spread_rmse": 12.340731371910287,
       "ats_record_all": [
-        0,
-        0,
-        0
+        42,
+        20,
+        1
       ],
       "ats_record_edge_2": [
-        0,
-        0,
+        29,
+        10,
         0
       ],
       "ats_record_edge_3": [
-        0,
-        0,
+        20,
+        7,
         0
       ],
       "ats_record_edge_5": [
-        0,
-        0,
+        8,
+        4,
         0
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 41.41414141414141,
       "ou_record_all": [
-        0,
-        0,
+        31,
+        32,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        28,
+        20,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        27,
+        18,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": 14.545454545454545,
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 11.919679056082888,
+          "spread_rmse": 11.18270065105103,
           "ats_record": [
-            0,
-            0,
-            0
+            22,
+            9,
+            1
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 11.247676237988067,
+          "spread_rmse": 11.00573344542228,
           "ats_record": [
-            0,
-            0,
+            13,
+            3,
             0
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 10.391866122300993,
+          "spread_rmse": 10.561817470740445,
           "ats_record": [
-            0,
-            0,
+            4,
+            4,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 10.287974733097068,
+          "spread_rmse": 10.392066243486,
           "ats_record": [
-            0,
-            0,
+            3,
+            1,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 13.736204436079875,
+          "spread_rmse": 15.016276785201331,
           "ats_record": [
             0,
-            0,
+            2,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 9.6,
+          "spread_rmse": 9.76535161396069,
           "ats_record": [
             0,
-            0,
+            1,
             0
           ]
         }
       },
       "n_games": 63,
-      "n_games_competitive": 20,
-      "n_games_mismatch": 43,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 63,
       "train_years": [
         2008,
         2009,
@@ -1643,118 +1449,104 @@
       ]
     },
     "2023": {
-      "spread_rmse": 11.276279430866433,
-      "total_rmse": 17.95779609788882,
-      "competitive_rmse": 11.225300160860606,
-      "mismatch_rmse": 11.31295492338565,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 11.320682557207599,
+      "total_rmse": 16.816813496540544,
+      "vs_market_spread_rmse": 11.538679691899679,
       "ats_record_all": [
-        0,
-        0,
+        38,
+        24,
         0
       ],
       "ats_record_edge_2": [
-        0,
-        0,
+        23,
+        13,
         0
       ],
       "ats_record_edge_3": [
-        0,
-        0,
+        18,
+        11,
         0
       ],
       "ats_record_edge_5": [
-        0,
-        0,
+        10,
+        8,
         0
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 18.495297805642632,
       "ou_record_all": [
-        0,
-        0,
+        35,
+        27,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        31,
+        20,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        29,
+        18,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": 17.79497098646035,
       "by_round": {
         "R64": {
           "n_games": 31,
-          "spread_rmse": 11.389722325872905,
+          "spread_rmse": 11.60191092303488,
           "ats_record": [
-            0,
-            0,
+            18,
+            13,
             0
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 10.61975942536018,
+          "spread_rmse": 10.664359126027124,
           "ats_record": [
-            0,
-            0,
+            11,
+            5,
             0
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 11.196011524878116,
+          "spread_rmse": 11.02543090598213,
           "ats_record": [
-            0,
-            0,
+            4,
+            4,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 15.160538512203436,
+          "spread_rmse": 14.762509695274785,
           "ats_record": [
-            0,
-            0,
+            3,
+            1,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 4.954886042242544,
+          "spread_rmse": 5.327551223233112,
           "ats_record": [
-            0,
-            0,
+            1,
+            1,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 9.291666666666668,
+          "spread_rmse": 7.240317344665527,
           "ats_record": [
-            0,
+            1,
             0,
             0
           ]
         }
       },
       "n_games": 62,
-      "n_games_competitive": 26,
-      "n_games_mismatch": 36,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 62,
       "train_years": [
         2008,
         2009,
@@ -1773,118 +1565,104 @@
       ]
     },
     "2024": {
-      "spread_rmse": 11.470603661637078,
-      "total_rmse": 22.375172584442808,
-      "competitive_rmse": 10.235326440695182,
-      "mismatch_rmse": 12.140323285383937,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 11.060970823821712,
+      "total_rmse": 22.019140700987787,
+      "vs_market_spread_rmse": 12.396669688058916,
       "ats_record_all": [
-        0,
-        0,
-        0
+        44,
+        16,
+        2
       ],
       "ats_record_edge_2": [
-        0,
-        0,
-        0
+        27,
+        6,
+        2
       ],
       "ats_record_edge_3": [
-        0,
-        0,
-        0
+        18,
+        2,
+        2
       ],
       "ats_record_edge_5": [
-        0,
-        0,
-        0
+        6,
+        1,
+        1
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 71.81818181818181,
       "ou_record_all": [
-        0,
-        0,
+        37,
+        25,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        33,
+        23,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        30,
+        23,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": 8.061749571183533,
       "by_round": {
         "R64": {
           "n_games": 31,
-          "spread_rmse": 10.102604396872016,
+          "spread_rmse": 9.747803081151176,
           "ats_record": [
-            0,
-            0,
-            0
+            25,
+            5,
+            1
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 14.25530433870686,
+          "spread_rmse": 13.934824392519392,
           "ats_record": [
-            0,
-            0,
-            0
+            9,
+            6,
+            1
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 10.602477739384796,
+          "spread_rmse": 9.72675103650163,
           "ats_record": [
-            0,
-            0,
+            6,
+            2,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 12.71961762840267,
+          "spread_rmse": 12.065926296212936,
           "ats_record": [
-            0,
-            0,
+            2,
+            2,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 3.3290610481451224,
+          "spread_rmse": 1.4710351481137083,
           "ats_record": [
-            0,
+            2,
             0,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 13.177777777777777,
+          "spread_rmse": 13.760962724685669,
           "ats_record": [
             0,
-            0,
+            1,
             0
           ]
         }
       },
       "n_games": 62,
-      "n_games_competitive": 23,
-      "n_games_mismatch": 39,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 62,
       "train_years": [
         2008,
         2009,
@@ -1904,118 +1682,104 @@
       ]
     },
     "2025": {
-      "spread_rmse": 10.059321773345967,
-      "total_rmse": 16.350900122101258,
-      "competitive_rmse": 10.635343409772165,
-      "mismatch_rmse": 9.604661543316261,
-      "vs_market_spread_rmse": null,
+      "spread_rmse": 9.966425671405485,
+      "total_rmse": 17.77686072803842,
+      "vs_market_spread_rmse": 10.15162822189404,
       "ats_record_all": [
-        0,
-        0,
+        39,
+        24,
         0
       ],
       "ats_record_edge_2": [
-        0,
-        0,
+        26,
+        13,
         0
       ],
       "ats_record_edge_3": [
-        0,
-        0,
+        22,
+        7,
         0
       ],
       "ats_record_edge_5": [
-        0,
-        0,
+        10,
+        5,
         0
       ],
-      "ats_roi_edge_3": 0.0,
-      "ats_record_competitive": [
-        0,
-        0,
-        0
-      ],
-      "ats_record_mismatch": [
-        0,
-        0,
-        0
-      ],
+      "ats_roi_edge_3": 44.827586206896555,
       "ou_record_all": [
-        0,
-        0,
+        33,
+        30,
         0
       ],
       "ou_record_edge_2": [
-        0,
-        0,
+        29,
+        26,
         0
       ],
       "ou_record_edge_3": [
-        0,
-        0,
+        27,
+        23,
         0
       ],
-      "ou_roi_edge_3": 0.0,
+      "ou_roi_edge_3": 3.090909090909091,
       "by_round": {
         "R64": {
           "n_games": 32,
-          "spread_rmse": 10.692017625787592,
+          "spread_rmse": 10.23689736463088,
           "ats_record": [
-            0,
-            0,
+            21,
+            11,
             0
           ]
         },
         "R32": {
           "n_games": 16,
-          "spread_rmse": 8.483066762722144,
+          "spread_rmse": 8.517549165909845,
           "ats_record": [
-            0,
-            0,
+            11,
+            5,
             0
           ]
         },
         "S16": {
           "n_games": 8,
-          "spread_rmse": 10.906877910146916,
+          "spread_rmse": 10.958915230972883,
           "ats_record": [
-            0,
-            0,
+            4,
+            4,
             0
           ]
         },
         "E8": {
           "n_games": 4,
-          "spread_rmse": 11.109493965644187,
+          "spread_rmse": 11.859677721984722,
           "ats_record": [
-            0,
-            0,
+            2,
+            2,
             0
           ]
         },
         "F4": {
           "n_games": 2,
-          "spread_rmse": 6.7360713375432635,
+          "spread_rmse": 8.630396176316674,
           "ats_record": [
-            0,
-            0,
+            1,
+            1,
             0
           ]
         },
         "Champ": {
           "n_games": 1,
-          "spread_rmse": 5.407407407407407,
+          "spread_rmse": 8.43925428390503,
           "ats_record": [
             0,
-            0,
+            1,
             0
           ]
         }
       },
       "n_games": 63,
-      "n_games_competitive": 27,
-      "n_games_mismatch": 36,
-      "n_games_with_lines": 0,
+      "n_games_with_lines": 63,
       "train_years": [
         2008,
         2009,
@@ -2036,5 +1800,5 @@
       ]
     }
   },
-  "computed_at": "2026-03-15T13:45:26.495590"
+  "computed_at": "2026-03-16T22:27:10.967405"
 }
