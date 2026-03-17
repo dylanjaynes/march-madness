@@ -130,6 +130,32 @@ CREATE TABLE IF NOT EXISTS tournament_bracket (
     PRIMARY KEY (year, region, seed)
 );
 
+CREATE TABLE IF NOT EXISTS nit_results (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    year         INTEGER NOT NULL,
+    game_date    TEXT NOT NULL,
+    team1        TEXT NOT NULL,
+    team2        TEXT NOT NULL,
+    score1       INTEGER,
+    score2       INTEGER,
+    round_number INTEGER,
+    round_name   TEXT,
+    UNIQUE(year, game_date, team1, team2)
+);
+
+CREATE TABLE IF NOT EXISTS nit_lines (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    year            INTEGER NOT NULL,
+    game_date       TEXT NOT NULL,
+    team1           TEXT NOT NULL,
+    team2           TEXT NOT NULL,
+    spread_line     REAL,
+    total_line      REAL,
+    spread_favorite TEXT,
+    source          TEXT,
+    UNIQUE(year, game_date, team1, team2)
+);
+
 CREATE TABLE IF NOT EXISTS predictions (
     prediction_id TEXT PRIMARY KEY,
     created_at TIMESTAMP,
