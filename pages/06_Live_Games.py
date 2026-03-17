@@ -58,7 +58,6 @@ with st.sidebar:
         help="R64 works best for most games.",
     )
     st.divider()
-    import datetime
     today = _dt.date.today()
     date_filter = st.sidebar.radio(
         "Show games",
@@ -396,9 +395,8 @@ if hide_pass:
 if min_edge > 0:
     view = view[view["abs_edge"].notna() & (view["abs_edge"] >= min_edge)]
 # Date filter
-import datetime as _datetime_mod
-_today_str    = _datetime_mod.date.today().isoformat()
-_tomorrow_str = (_datetime_mod.date.today() + _datetime_mod.timedelta(days=1)).isoformat()
+_today_str    = _dt.date.today().isoformat()
+_tomorrow_str = (_dt.date.today() + _dt.timedelta(days=1)).isoformat()
 if date_filter == "Today":
     view = view[view["date_key"] == _today_str]
 elif date_filter == "Tomorrow":
