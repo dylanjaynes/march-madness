@@ -57,13 +57,23 @@ def load_bet_board(year: int):
             if "error" not in proj:
                 # Try to pull market lines from historical_lines
                 lines = query_df(
-                    """SELECT spread_line, total_line FROM historical_lines
+                    """SELECT spread_line, total_line, spread_favorite FROM historical_lines
                        WHERE year=? AND ((team1=? AND team2=?) OR (team1=? AND team2=?))
                        LIMIT 1""",
                     params=[year, t1, t2, t2, t1],
                 )
-                mkt_spread = float(lines.iloc[0]["spread_line"]) if not lines.empty and pd.notna(lines.iloc[0]["spread_line"]) else None
+                mkt_spread_raw = float(lines.iloc[0]["spread_line"]) if not lines.empty and pd.notna(lines.iloc[0]["spread_line"]) else None
                 mkt_total = float(lines.iloc[0]["total_line"]) if not lines.empty and pd.notna(lines.iloc[0]["total_line"]) else None
+
+                # Convert to model convention (positive = team_a favored).
+                # spread_line is always a positive absolute value.
+                # If spread_favorite == team_a, keep positive. Otherwise negate.
+                if mkt_spread_raw is not None and not lines.empty:
+                    fav = str(lines.iloc[0].get("spread_favorite") or "").strip().lower()
+                    team_a_name = str(proj.get("team_a") or "").strip().lower()
+                    mkt_spread = mkt_spread_raw if fav == team_a_name else -mkt_spread_raw
+                else:
+                    mkt_spread = None
 
                 proj["market_spread"] = mkt_spread
                 proj["market_total"] = mkt_total
@@ -75,10 +85,23 @@ def load_bet_board(year: int):
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]
-            mkt_spread = odds.get("spread_home")
+            mkt_spread_raw = odds.get("spread_home")
             mkt_total = odds.get("total_line")
             proj = project_game(home, away, round_num=1, year=year)
             if "error" not in proj:
+                # Convert spread_home (sportsbook: negative = home favored) to
+                # model convention (positive = team_a favored).
+                if mkt_spread_raw is not None:
+                    try:
+                        sh = float(mkt_spread_raw)
+                        team_a_name = str(proj.get("team_a") or "").strip().lower()
+                        home_name = str(home).strip().lower()
+                        mkt_spread = -sh if team_a_name == home_name else sh
+                    except (TypeError, ValueError):
+                        mkt_spread = None
+                else:
+                    mkt_spread = None
+
                 proj["market_spread"] = mkt_spread
                 proj["market_total"] = mkt_total
                 proj["spread_edge"] = (proj["projected_spread"] - mkt_spread) if mkt_spread is not None else None

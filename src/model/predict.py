@@ -270,12 +270,25 @@ def project_all_live_games(year: int = None) -> pd.DataFrame:
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]
-            mkt_spread = odds.get("spread_home")
+            mkt_spread_raw = odds.get("spread_home")
             mkt_total = odds.get("total_line")
 
             # Determine which is team_a (better seed) — default to home for live games
             proj = project_game(home, away, round_num=1, year=year)
             if "error" not in proj:
+                # Convert spread_home (sportsbook: negative = home favored) to
+                # model convention (positive = team_a favored).
+                if mkt_spread_raw is not None:
+                    try:
+                        sh = float(mkt_spread_raw)
+                        team_a_name = str(proj.get("team_a") or "").strip().lower()
+                        home_name = str(home).strip().lower()
+                        mkt_spread = -sh if team_a_name == home_name else sh
+                    except (TypeError, ValueError):
+                        mkt_spread = None
+                else:
+                    mkt_spread = None
+
                 proj["market_spread"] = mkt_spread
                 proj["market_total"] = mkt_total
                 proj["spread_edge"] = (
