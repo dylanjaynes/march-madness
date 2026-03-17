@@ -362,7 +362,7 @@ hcol1, hcol2 = st.columns([5, 1])
 with hcol1:
     st.caption(
         f"{season_label(current_year)} · {data_as_of(current_year)} · "
-        f"Auto-refreshes every 2 min · {datetime.now().strftime('%H:%M:%S')}"
+        f"Auto-refreshes every 2 min · {datetime.datetime.now().strftime('%H:%M:%S')}"
     )
 with hcol2:
     if st.button("🔄 Refresh", use_container_width=True):
