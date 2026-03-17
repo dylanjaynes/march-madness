@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 from src.model.backtest import calculate_roi
-from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
+from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, COMPETITIVE_SPREAD_THRESHOLD
 from src.model.predict import season_label
 
 st.set_page_config(page_title="Backtest Results", page_icon="📈", layout="wide")
@@ -165,6 +165,59 @@ with k4:
               f"vs Market {mkt_rmse:.2f} pts")
 with k5:
     st.metric("Total RMSE", f"{total_rmse:.2f} pts")
+
+# ── Competitive-only summary ──────────────────────────────────────────────────
+if not preds_df.empty and "market_spread" in preds_df.columns:
+    comp_preds = preds_df[
+        preds_df["market_spread"].notna() &
+        (preds_df["market_spread"].abs() <= COMPETITIVE_SPREAD_THRESHOLD)
+    ].copy()
+
+    if not comp_preds.empty:
+        st.subheader(
+            f"📊 Competitive Games (|market spread| ≤ {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts)"
+        )
+        st.caption(
+            f"{len(comp_preds)} of {len(preds_df[preds_df['market_spread'].notna()])} "
+            "lined games · blowout mismatches excluded · "
+            "backtest: 65.3% ATS overall, 70.4% at Edge≥3"
+        )
+
+        comp_ats_all = compute_true_ats(comp_preds, min_edge=0.0)
+        comp_ats_3   = compute_true_ats(comp_preds, min_edge=3.0)
+        comp_ats_5   = compute_true_ats(comp_preds, min_edge=5.0)
+
+        c_rec_all = ats_record(comp_ats_all)
+        c_rec_3   = ats_record(comp_ats_3)
+        c_rec_5   = ats_record(comp_ats_5)
+
+        c_roi_3 = calculate_roi(
+            [r for r in comp_ats_3["true_ats"].tolist() if r != "PUSH"]
+        ) if not comp_ats_3.empty else 0.0
+        c_roi_5 = calculate_roi(
+            [r for r in comp_ats_5["true_ats"].tolist() if r != "PUSH"]
+        ) if not comp_ats_5.empty else 0.0
+
+        ck1, ck2, ck3, ck4 = st.columns(4)
+        with ck1:
+            cw, cl, cp = c_rec_all
+            ct = cw + cl
+            st.metric("ATS (All competitive)", f"{cw}-{cl}-{cp}",
+                      f"{cw/ct*100:.1f}%" if ct > 0 else "—")
+        with ck2:
+            cw3, cl3, _ = c_rec_3
+            ct3 = cw3 + cl3
+            st.metric("ATS @ Edge≥3", f"{cw3}-{cl3}",
+                      f"{cw3/ct3*100:.1f}% · {c_roi_3:+.1f}% ROI" if ct3 > 0 else "—")
+        with ck3:
+            cw5, cl5, _ = c_rec_5
+            ct5 = cw5 + cl5
+            st.metric("ATS @ Edge≥5", f"{cw5}-{cl5}",
+                      f"{cw5/ct5*100:.1f}% · {c_roi_5:+.1f}% ROI" if ct5 > 0 else "—")
+        with ck4:
+            total_lined = len(preds_df[preds_df["market_spread"].notna()])
+            st.metric("Coverage", f"{len(comp_preds)}/{total_lined} games",
+                      f"{len(comp_preds)/max(total_lined,1)*100:.0f}% of lined games")
 
 st.divider()
 

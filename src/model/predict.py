@@ -5,9 +5,24 @@ from scipy.stats import norm
 from src.utils.config import (
     SPREAD_STD_DEV, TOURNAMENT_YEARS, ROUND_NAMES,
     COMPETITIVE_COVERAGE_STD, MISMATCH_COVERAGE_STD,
+    COMPETITIVE_SPREAD_THRESHOLD,
 )
 
 # COVERAGE_STD = 12.0  # legacy single-std constant (replaced by COMPETITIVE/MISMATCH below)
+
+
+def is_competitive_game(market_spread) -> bool:
+    """
+    A game is competitive for ATS betting when the market spread
+    is within COMPETITIVE_SPREAD_THRESHOLD points.
+    Returns True when no line is available yet (optimistic default).
+    """
+    if market_spread is None:
+        return True
+    try:
+        return abs(float(market_spread)) <= COMPETITIVE_SPREAD_THRESHOLD
+    except (TypeError, ValueError):
+        return True
 
 
 def coverage_probability(model_spread: float, market_spread: float,

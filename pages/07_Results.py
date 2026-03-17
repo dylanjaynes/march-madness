@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, PROCESSED_DIR
+from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, PROCESSED_DIR, COMPETITIVE_SPREAD_THRESHOLD
 from src.utils.db import query_df, db_conn, upsert_df
 from src.model.predict import project_game
 from src.utils.team_map import normalize_team_name
@@ -427,6 +427,30 @@ c4.metric("ATS (Edge≥3)",  _record_str(graded_3["ats_result"].tolist()))
 c5.metric("ATS ROI (E≥3)", f"{roi_3:.1f}%" if not np.isnan(roi_3) else "—")
 c6.metric("O/U (All)",     _record_str(ou_all["ou_result"].tolist(), with_pct=False))
 
+# Competitive-only ATS (|market_spread| <= threshold)
+comp_graded = graded[
+    graded["market_spread_a"].notna() &
+    (graded["market_spread_a"].abs() <= COMPETITIVE_SPREAD_THRESHOLD)
+]
+if not comp_graded.empty:
+    comp_graded_3 = comp_graded[comp_graded["spread_edge"].abs() >= 3]
+    comp_roi_3 = _roi(comp_graded_3["ats_result"].tolist())
+    cc1, cc2, cc3 = st.columns(3)
+    cc1.metric(
+        f"Competitive ATS (|line|≤{COMPETITIVE_SPREAD_THRESHOLD:.0f})",
+        _record_str(comp_graded["ats_result"].tolist()),
+    )
+    cc2.metric(
+        "Competitive ATS (Edge≥3)",
+        _record_str(comp_graded_3["ats_result"].tolist()),
+        f"{comp_roi_3:.1f}% ROI" if not np.isnan(comp_roi_3) else "—",
+    )
+    cc3.metric(
+        "Competitive games",
+        f"{len(comp_graded)}/{len(graded)} w/ lines",
+        f"{len(comp_graded)/max(len(graded),1)*100:.0f}% of lined games",
+    )
+
 st.divider()
 
 
@@ -589,6 +613,12 @@ for date_str, tab in zip(dates, date_tabs):
 
             if mt_str:
                 st.caption(f"&nbsp;&nbsp;&nbsp;{mt_str}")
+            mkt_a = row.get("market_spread_a")
+            if mkt_a is not None and pd.notna(mkt_a) and abs(float(mkt_a)) > COMPETITIVE_SPREAD_THRESHOLD:
+                st.caption(
+                    f"⚠️ Large-spread game ({mkt_a:+.1f} pts) — "
+                    "model edge on blowout mismatches is unreliable"
+                )
             st.divider()
 
 

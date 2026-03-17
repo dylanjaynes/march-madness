@@ -11,7 +11,7 @@ from pathlib import Path
 _TOTAL_CAL_PATH = Path("models/total_model_calibrator.pkl")
 _total_calibrated = _TOTAL_CAL_PATH.exists()
 
-from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
+from src.utils.config import TOURNAMENT_YEARS, COMPETITIVE_SPREAD_THRESHOLD, ROUND_NAMES
 from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly,
     bet_tier, season_label, data_as_of,
@@ -170,7 +170,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
         return pd.DataFrame(), []
 
     pregame_ref = pregame_ref or {}
-    rows, errors = [], []
+    rows, errors, skipped_blowouts = [], [], []
     now_utc = datetime.now(timezone.utc)
     # Seed map: used when torvik_ratings.seed is NULL (current year before data refresh)
     bracket_seeds = load_bracket_seed_map(yr)
@@ -180,6 +180,17 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
         away = game["away_team"]
         mkt_spread_home = game.get("spread_home")
         mkt_total = game.get("total_line")
+
+        # Skip blowout mismatches — model has no consistent edge on large spreads
+        if mkt_spread_home is not None:
+            try:
+                if abs(float(mkt_spread_home)) > COMPETITIVE_SPREAD_THRESHOLD:
+                    skipped_blowouts.append(
+                        f"{home} vs {away} (line: {float(mkt_spread_home):+.1f} pts)"
+                    )
+                    continue
+            except (TypeError, ValueError):
+                pass
         commence = str(game.get("commence_time", ""))
         game_id = game.get("game_id", "")
 
@@ -351,7 +362,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             "total_moved":    total_moved,
         })
 
-    return pd.DataFrame(rows), errors
+    return pd.DataFrame(rows), errors, skipped_blowouts
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -377,8 +388,8 @@ with st.spinner("Loading games..."):
     _game_ids = tuple(_live_df["game_id"].tolist()) if not _live_df.empty else ()
     _pregame_ref = load_pregame_reference(_game_ids)
     # 4. Build full projections (cached 2 min)
-    df, errors = build_projections(round_context, current_year, bankroll, sizing,
-                                   pregame_ref=_pregame_ref)
+    df, errors, skipped_blowouts = build_projections(round_context, current_year, bankroll, sizing,
+                                                     pregame_ref=_pregame_ref)
 
 if df.empty:
     st.warning("No upcoming NCAAB games found.")
@@ -713,6 +724,19 @@ for date, tab in zip(dates, date_tabs):
                 elif ou_str:
                     st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
                 st.divider()
+
+# ── Large-spread games (hidden from feed) ─────────────────────────────────────
+if skipped_blowouts:
+    with st.expander(
+        f"⚠️ {len(skipped_blowouts)} large-spread game(s) hidden",
+        expanded=False,
+    ):
+        st.caption(
+            f"Games with |spread| > {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts are "
+            "excluded — the model has no consistent edge on blowout mismatches."
+        )
+        for g in skipped_blowouts:
+            st.write(f"• {g}")
 
 # ── Errors ────────────────────────────────────────────────────────────────────
 if errors:

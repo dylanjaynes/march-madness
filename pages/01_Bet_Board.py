@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
+from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, COMPETITIVE_SPREAD_THRESHOLD
 from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly, bet_tier,
     season_label, data_as_of,
@@ -155,9 +155,19 @@ for _, row in df.iterrows():
 
 edf = pd.DataFrame(rows_enriched)
 
-# ── Split mismatch vs competitive ─────────────────────────────────────────────
-competitive_df = edf[edf["is_mismatch"] == False].copy()
-mismatch_df = edf[edf["is_mismatch"] == True].copy()
+# ── Split competitive vs large-spread by market spread threshold ───────────────
+def _is_competitive_row(row):
+    mkt = row.get("Market Spread")
+    if mkt is None or pd.isna(mkt):
+        return True  # no line yet — include in main table
+    try:
+        return abs(float(mkt)) <= COMPETITIVE_SPREAD_THRESHOLD
+    except (TypeError, ValueError):
+        return True
+
+edf["_competitive"] = edf.apply(_is_competitive_row, axis=1)
+competitive_df = edf[edf["_competitive"]].copy()
+mismatch_df    = edf[~edf["_competitive"]].copy()
 
 # ── Filter (apply only to competitive) ───────────────────────────────────────
 if not show_passes:
@@ -247,12 +257,24 @@ if not totals_df.empty:
         hide_index=True,
     )
 
-with st.expander("⚠️ Mismatch Games (model edge unreliable)", expanded=False):
-    st.caption("These games have seed_diff ≥ 5 or barthag_diff ≥ 0.3. The model's edge on these games reflects mean-regression artifacts, not real signal.")
+with st.expander(
+    f"⚠️ Large-spread games — {len(mismatch_df)} games (|spread| > {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts)",
+    expanded=False,
+):
+    st.caption(
+        f"Games where the market spread exceeds {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts. "
+        "Backtest shows 59.6% ATS on 52 such games — not enough signal to bet confidently. "
+        "The model's edge on these is noise, not skill."
+    )
     if not mismatch_df.empty:
-        st.dataframe(mismatch_df.drop(columns=["is_mismatch"], errors="ignore"), use_container_width=True)
+        disp_cols = ["Game", "Round", "Date", "Model Spread", "Market Spread", "Edge (pts)"]
+        st.dataframe(
+            mismatch_df[[c for c in disp_cols if c in mismatch_df.columns]],
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
-        st.info("No mismatch games today.")
+        st.info("No large-spread games today.")
 
 st.divider()
 st.caption(

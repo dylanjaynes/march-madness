@@ -71,6 +71,12 @@ TOTAL_MODEL_PARAMS = {
 MISMATCH_SEED_DIFF_THRESHOLD = 5
 MISMATCH_BARTHAG_THRESHOLD = 0.3
 
+# A game is "competitive" for ATS betting purposes when the market spread
+# is within a range the model can meaningfully compete with.
+# Backtest shows: |mkt| <= 14 → 65.3% ATS (n=320, p<0.0001)
+#                 |mkt| > 14  → 59.6% ATS (n=52, no signal)
+COMPETITIVE_SPREAD_THRESHOLD = 14.0
+
 # Competitive game model (XGBoost, same architecture as SPREAD_MODEL_PARAMS)
 COMPETITIVE_MODEL_PARAMS = {
     "n_estimators": 300,
