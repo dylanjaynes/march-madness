@@ -44,7 +44,7 @@ with st.sidebar:
                                 value=1000, step=100)
     sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
     min_edge = st.slider("Min |edge| (pts)", 0.0, 15.0, 0.0, 0.5)
-    hide_pass = st.checkbox("Hide Pass-tier bets", value=True)
+    hide_pass = st.checkbox("Hide Pass-tier bets", value=False)
     st.divider()
     round_context = st.selectbox(
         "Round context",
