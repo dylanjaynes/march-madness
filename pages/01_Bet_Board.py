@@ -82,11 +82,20 @@ def load_bet_board(year: int):
                 proj["game_date"] = str(game.get("game_date") or "")
                 rows.append(proj)
     else:
+        # Seeds: try torvik_ratings first, supplement with tournament_bracket
         seed_df = query_df(
             "SELECT team, seed FROM torvik_ratings WHERE year = ? AND seed IS NOT NULL",
             params=[year],
         )
         seed_lookup = dict(zip(seed_df["team"], seed_df["seed"])) if not seed_df.empty else {}
+        tb_df = query_df(
+            "SELECT team, seed FROM tournament_bracket WHERE year = ?",
+            params=[year],
+        )
+        if not tb_df.empty:
+            for _, row in tb_df.iterrows():
+                if row["team"] not in seed_lookup:
+                    seed_lookup[row["team"]] = row["seed"]
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]

@@ -120,11 +120,28 @@ def project_game(team_a: str, team_b: str,
     # Canonical team ordering: better seed (lower number) is team_a.
     if seed_a is None or seed_b is None:
         from src.utils.db import query_df
-        rows = query_df(
-            "SELECT team, seed FROM torvik_ratings WHERE year=? AND team IN (?,?) AND seed IS NOT NULL",
-            params=[year, team_a, team_b],
-        )
-        seed_map = dict(zip(rows["team"], rows["seed"])) if not rows.empty else {}
+
+        def _lookup_seeds(ta, tb, yr):
+            """Try torvik_ratings first, fall back to tournament_bracket."""
+            rows = query_df(
+                "SELECT team, seed FROM torvik_ratings WHERE year=? AND team IN (?,?) AND seed IS NOT NULL",
+                params=[yr, ta, tb],
+            )
+            seed_map = dict(zip(rows["team"], rows["seed"])) if not rows.empty else {}
+            # Fill any missing seeds from tournament_bracket
+            missing = [t for t in (ta, tb) if t not in seed_map]
+            if missing:
+                tb_rows = query_df(
+                    "SELECT team, seed FROM tournament_bracket WHERE year=? AND team IN ({})".format(
+                        ",".join("?" * len(missing))
+                    ),
+                    params=[yr] + missing,
+                )
+                if not tb_rows.empty:
+                    seed_map.update(dict(zip(tb_rows["team"], tb_rows["seed"])))
+            return seed_map
+
+        seed_map = _lookup_seeds(team_a, team_b, year)
         sa = int(seed_map.get(team_a) or 8)
         sb = int(seed_map.get(team_b) or 8)
     else:
