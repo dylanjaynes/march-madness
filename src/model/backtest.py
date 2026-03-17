@@ -1,12 +1,18 @@
+import copy
 import numpy as np
 import pandas as pd
 import pickle
 import xgboost as xgb
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import KFold
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.isotonic import IsotonicRegression
 
-from src.utils.config import TOURNAMENT_YEARS, MODELS_DIR, ROUND_NAMES
+from src.utils.config import (
+    TOURNAMENT_YEARS, MODELS_DIR, ROUND_NAMES,
+    COMPETITIVE_MODEL_PARAMS, MISMATCH_MODEL_PARAMS,
+    MISMATCH_SEED_DIFF_THRESHOLD, MISMATCH_BARTHAG_THRESHOLD,
+)
 from src.utils.db import query_df
 from src.features.matchup import MATCHUP_FEATURES, build_training_matrix, build_matchup_features
 
@@ -77,6 +83,30 @@ def _ats_record(results: list) -> tuple:
     return (w, l, p)
 
 
+def _train_competitive_model(X_train: pd.DataFrame, y_train: pd.Series) -> xgb.XGBRegressor:
+    """XGBoost on competitive games for one backtest fold."""
+    model = xgb.XGBRegressor(**COMPETITIVE_MODEL_PARAMS)
+    if len(X_train) >= 5:
+        model.fit(X_train, y_train)
+    return model
+
+
+def _train_mismatch_model(X_train: pd.DataFrame, y_train: pd.Series) -> Ridge:
+    """Ridge on mismatch games for one backtest fold."""
+    model = Ridge(**MISMATCH_MODEL_PARAMS)
+    if len(X_train) >= 3:
+        model.fit(X_train, y_train)
+    return model
+
+
+def _mismatch_mask_df(df: pd.DataFrame) -> np.ndarray:
+    """Boolean array marking mismatch games (same rule as train.py)."""
+    mask = df["seed_diff"].abs() >= MISMATCH_SEED_DIFF_THRESHOLD
+    if "barthag_diff" in df.columns:
+        mask = mask | (df["barthag_diff"].abs() >= MISMATCH_BARTHAG_THRESHOLD)
+    return mask.values
+
+
 def run_backtest(years: list = None) -> dict:
     """
     Walk-forward backtest. For each test year, train on all prior years.
@@ -86,7 +116,7 @@ def run_backtest(years: list = None) -> dict:
     ATS and O/U grading ONLY happens on games with real market lines.
     Games without lines still contribute to RMSE metrics.
     """
-    from src.utils.config import SPREAD_MODEL_PARAMS, TOTAL_MODEL_PARAMS
+    from src.utils.config import TOTAL_MODEL_PARAMS
 
     if years is None:
         years = TOURNAMENT_YEARS
@@ -132,27 +162,51 @@ def run_backtest(years: list = None) -> dict:
 
         print(f"  Backtest {test_year}: train={len(X_train)} games, test={len(X_test)} games")
 
-        # Train models
-        spread_model = _train_year_model(X_train, y_spread_train, SPREAD_MODEL_PARAMS)
-        total_model = _train_year_model(X_train, y_total_train, TOTAL_MODEL_PARAMS)
+        # ── Total model (XGBoost + TimeSeriesSplit isotonic calibration) ────────
+        total_model = xgb.XGBRegressor(**TOTAL_MODEL_PARAMS)
+        total_model.fit(X_train, y_total_train)
 
-        # Predict
-        pred_spread = spread_model.predict(X_test)
         pred_total = total_model.predict(X_test)
-
-        # Apply isotonic calibration to total predictions using OOF on training data
         try:
-            kf_cal = KFold(n_splits=5, shuffle=True, random_state=42)
-            oof_total = np.zeros(len(y_total_train))
-            for tr_idx, val_idx in kf_cal.split(X_train):
-                m_cal = total_model.__class__(**total_model.get_params())
+            cv_cal = TimeSeriesSplit(n_splits=5)
+            oof_total = np.full(len(y_total_train), np.nan)
+            for tr_idx, val_idx in cv_cal.split(X_train):
+                if len(tr_idx) < 5:
+                    continue
+                m_cal = xgb.XGBRegressor(**TOTAL_MODEL_PARAMS)
                 m_cal.fit(X_train.iloc[tr_idx], y_total_train.iloc[tr_idx])
                 oof_total[val_idx] = m_cal.predict(X_train.iloc[val_idx])
-            cal_total = IsotonicRegression(out_of_bounds="clip")
-            cal_total.fit(oof_total, y_total_train.values)
-            pred_total = cal_total.predict(pred_total)
+            valid_oof = ~np.isnan(oof_total)
+            if valid_oof.sum() >= 10:
+                cal_total = IsotonicRegression(out_of_bounds="clip")
+                cal_total.fit(oof_total[valid_oof], y_total_train.values[valid_oof])
+                pred_total = cal_total.predict(pred_total)
         except Exception:
-            pass  # calibration optional
+            pass
+
+        # ── Hybrid spread model (competitive=XGBoost, mismatch=Ridge) ───────────
+        df_train_idx = df_train.loc[X_train.index]
+        df_test_idx  = df_test.loc[X_test.index]
+
+        mis_train = _mismatch_mask_df(df_train_idx)
+        mis_test  = _mismatch_mask_df(df_test_idx)
+
+        X_tr_comp = X_train.iloc[~mis_train];  y_tr_comp = y_spread_train.iloc[~mis_train]
+        X_tr_mis  = X_train.iloc[mis_train];   y_tr_mis  = y_spread_train.iloc[mis_train]
+
+        comp_model = _train_competitive_model(X_tr_comp, y_tr_comp)
+        mis_model  = _train_mismatch_model(X_tr_mis, y_tr_mis)
+
+        pred_spread = np.zeros(len(X_test))
+        comp_idx = np.where(~mis_test)[0]
+        mis_idx  = np.where(mis_test)[0]
+        if len(comp_idx) > 0:
+            pred_spread[comp_idx] = comp_model.predict(X_test.iloc[comp_idx])
+        if len(mis_idx) > 0:
+            if len(X_tr_mis) >= 3:
+                pred_spread[mis_idx] = mis_model.predict(X_test.iloc[mis_idx])
+            else:
+                pred_spread[mis_idx] = comp_model.predict(X_test.iloc[mis_idx])
 
         # Compute metrics
         actual_spreads = y_spread_test.values
@@ -249,6 +303,9 @@ def run_backtest(years: list = None) -> dict:
                 "year": test_year,
                 "game_idx": j,
                 "round_number": round_nums[j] if j < len(round_nums) else None,
+                "is_mismatch": bool(mis_test[j]) if j < len(mis_test) else False,
+                "team_a": str(df_test_idx.iloc[j]["team_a"]) if "team_a" in df_test_idx.columns else "",
+                "team_b": str(df_test_idx.iloc[j]["team_b"]) if "team_b" in df_test_idx.columns else "",
                 "model_spread": model_spread,
                 "model_total": model_total,
                 "market_spread": mkt_spread,

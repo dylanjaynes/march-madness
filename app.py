@@ -98,7 +98,7 @@ def main():
     col_title, col_badge = st.columns([4, 1])
     with col_title:
         st.title("March Madness Projection Model")
-        st.caption("Hybrid Ridge+XGBoost spread model with isotonic calibration · BartTorvik efficiency ratings")
+        st.caption("Hybrid Ridge+XGBoost spread model · isotonic calibration · BartTorvik efficiency ratings")
     with col_badge:
         st.metric("Season", season)
         st.caption(data_note)
@@ -129,7 +129,8 @@ def main():
     import json
     from pathlib import Path
 
-    RESULTS_PATH = Path("data/processed/backtest_results.json")
+    _HERE = Path(__file__).resolve().parent
+    RESULTS_PATH = _HERE / "data" / "processed" / "backtest_results.json"
 
     def _load_backtest_summary():
         if not RESULTS_PATH.exists():

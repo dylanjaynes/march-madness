@@ -64,14 +64,14 @@ if df is None or df.empty:
     print("\nNo predictions to analyze.")
     sys.exit(0)
 
-real = df[df["market_spread"].abs() > 0.01].copy()
+real = df[df["market_spread"].notna() & (df["market_spread"].abs() > 0.01)].copy()
 print(f"\n{'='*80}")
 print(f"TRUE ATS BACKTEST (games with real market lines: {len(real)} of {len(df)})")
 print("=" * 80)
 
 print(f"\nCoverage by year:")
 for yr, grp in df.groupby("year"):
-    real_yr = grp[grp["market_spread"].abs() > 0.01]
+    real_yr = grp[grp["market_spread"].notna() & (grp["market_spread"].abs() > 0.01)]
     print(f"  {yr}: {len(real_yr)}/{len(grp)} games with real lines")
 
 real["actual_cover"] = real.apply(
@@ -116,7 +116,7 @@ for yr, grp in real.groupby("year"):
     pct = w / len(sub) * 100 if len(sub) > 0 else 0
     print(f"  {yr}: {w}-{l} ({pct:.1f}%)")
 
-ou = real[real["market_total"].abs() > 0.01].copy()
+ou = real[real["market_total"].notna() & (real["market_total"].abs() > 0.01)].copy()
 if not ou.empty:
     ou["ou_result"] = ou.apply(
         lambda r: "OVER" if r["actual_total"] > r["market_total"]

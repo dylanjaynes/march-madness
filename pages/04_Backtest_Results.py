@@ -21,8 +21,9 @@ st.caption(
     "True ATS = actual margin vs. real market spread (not directional accuracy)."
 )
 
-RESULTS_PATH = Path("data/processed/backtest_results.json")
-PREDS_PATH   = Path("data/processed/backtest_predictions.csv")
+_HERE = Path(__file__).resolve().parent
+RESULTS_PATH = _HERE.parent / "data" / "processed" / "backtest_results.json"
+PREDS_PATH   = _HERE.parent / "data" / "processed" / "backtest_predictions.csv"
 
 
 @st.cache_data(ttl=86400)
