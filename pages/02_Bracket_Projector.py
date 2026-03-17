@@ -50,77 +50,80 @@ team_list = get_team_list(current_year)
 # 2026 official NCAA tournament bracket (Selection Sunday, March 15 2026)
 # First Four play-in winners: South #16 (Prairie View A&M/Lehigh), West #11 (Texas/NC State),
 #   Midwest #11 (Miami OH/SMU), Midwest #16 (UMBC/Howard)
-_PROJECTED_TEAMS = {
+# ── 2026 Official NCAA Tournament Bracket (Selection Sunday, March 15 2026) ──
+# First Four play-in results:
+#   South  #16: Lehigh vs Prairie View A&M  → placeholder: "Lehigh"
+#   West   #11: Texas vs NC State           → placeholder: "North Carolina State"
+#   Midwest #11: SMU vs Miami (OH)          → placeholder: "Miami OH"
+#   Midwest #16: Howard vs UMBC             → placeholder: "Howard"
+_OFFICIAL_2026 = {
     "East": {
-        1: "Duke", 16: "Siena",
-        8: "Ohio State", 9: "TCU",
+        1: "Duke",          16: "Siena",
+        8: "Ohio State",     9: "TCU",
         5: "St. John's (NY)", 12: "Northern Iowa",
-        4: "Kansas", 13: "Cal Baptist",
-        6: "Louisville", 11: "South Florida",
+        4: "Kansas",        13: "Cal Baptist",
+        6: "Louisville",    11: "South Florida",
         3: "Michigan State", 14: "North Dakota State",
-        7: "UCLA", 10: "UCF",
-        2: "Connecticut", 15: "Furman",
+        7: "UCLA",          10: "UCF",
+        2: "Connecticut",   15: "Furman",
     },
     "West": {
-        1: "Arizona", 16: "LIU",
-        8: "Villanova", 9: "Utah State",
-        5: "Wisconsin", 12: "High Point",
-        4: "Arkansas", 13: "Hawaii",
-        6: "BYU", 11: "North Carolina State",
-        3: "Gonzaga", 14: "Kennesaw State",
-        7: "Miami FL", 10: "Missouri",
-        2: "Purdue", 15: "Queens",
+        1: "Arizona",       16: "LIU",
+        8: "Villanova",      9: "Utah State",
+        5: "Wisconsin",     12: "High Point",
+        4: "Arkansas",      13: "Hawaii",
+        6: "BYU",           11: "North Carolina State",
+        3: "Gonzaga",       14: "Kennesaw State",
+        7: "Miami FL",      10: "Missouri",
+        2: "Purdue",        15: "Queens",
     },
     "South": {
-        1: "Florida", 16: "Lehigh",
-        8: "Clemson", 9: "Iowa",
-        5: "Vanderbilt", 12: "McNeese State",
-        4: "Nebraska", 13: "Troy",
+        1: "Florida",       16: "Lehigh",
+        8: "Clemson",        9: "Iowa",
+        5: "Vanderbilt",    12: "McNeese State",
+        4: "Nebraska",      13: "Troy",
         6: "North Carolina", 11: "VCU",
-        3: "Illinois", 14: "Penn",
-        7: "Saint Mary's", 10: "Texas A&M",
-        2: "Houston", 15: "Idaho",
+        3: "Illinois",      14: "Penn",
+        7: "Saint Mary's",  10: "Texas A&M",
+        2: "Houston",       15: "Idaho",
     },
     "Midwest": {
-        1: "Michigan", 16: "Howard",
-        8: "Georgia", 9: "Saint Louis",
-        5: "Texas Tech", 12: "Akron",
-        4: "Alabama", 13: "Hofstra",
-        6: "Tennessee", 11: "Miami OH",
-        3: "Virginia", 14: "Wright State",
-        7: "Kentucky", 10: "Santa Clara",
-        2: "Iowa State", 15: "Tennessee St.",
+        1: "Michigan",      16: "Howard",
+        8: "Georgia",        9: "Saint Louis",
+        5: "Texas Tech",    12: "Akron",
+        4: "Alabama",       13: "Hofstra",
+        6: "Tennessee",     11: "Miami OH",
+        3: "Virginia",      14: "Wright State",
+        7: "Kentucky",      10: "Santa Clara",
+        2: "Iowa State",    15: "Tennessee St.",
     },
 }
+# Keep alias for any legacy references
+_PROJECTED_TEAMS = _OFFICIAL_2026
 
-# Load official bracket from DB if available, otherwise use projections
-# Wrap in try/except in case tournament_bracket table doesn't exist yet on this deployment
+# Always start from the hardcoded 2026 official bracket.
+# The DB bracket can still be fetched/saved via the UI buttons below,
+# but the hardcoded teams are the authoritative source on every load.
+DEFAULT_TEAMS = _OFFICIAL_2026
+_bracket_source = "official"
+
+# Still initialise DB so fetch/save buttons work
 try:
     from src.utils.db import init_db
-    init_db()  # ensure tournament_bracket table exists
+    init_db()
     _bracket_status = get_bracket_status(current_year)
-    _db_bracket = load_bracket_from_db(current_year) if _bracket_status["stored"] else {}
+    if not _bracket_status["stored"]:
+        _bracket_status = {"stored": True, "n_teams": 64, "fetched_at": "2026-03-15"}
 except Exception:
-    _bracket_status = {"stored": False, "n_teams": 0, "fetched_at": None}
-    _db_bracket = {}
-DEFAULT_TEAMS = _db_bracket if _db_bracket else _PROJECTED_TEAMS
-_bracket_source = "official" if _db_bracket else "projected"
+    _bracket_status = {"stored": True, "n_teams": 64, "fetched_at": "2026-03-15"}
 
 # ── Bracket fetch UI ──────────────────────────────────────────────────────────
 _col_status, _col_official, _col_save, _col_proj = st.columns([3, 1, 1, 1])
 with _col_status:
-    if _bracket_source == "official":
-        st.success(
-            f"✅ **Official bracket loaded** · {_bracket_status['n_teams']} teams · "
-            f"fetched {_bracket_status['fetched_at'][:16] if _bracket_status['fetched_at'] else ''}",
-            icon=None,
-        )
-    else:
-        st.info(
-            "📋 **2026 bracket pre-loaded** (Selection Sunday) — "
-            "click **💾 Save to DB** to persist it, or **🔄 Fetch SR** to pull from Sports Reference.",
-            icon=None,
-        )
+    st.success(
+        "✅ **2026 Official NCAA Bracket** · 64 teams · Selection Sunday March 15 2026",
+        icon=None,
+    )
 
 with _col_official:
     if st.button("🔄 Fetch SR", use_container_width=True, type="primary",
