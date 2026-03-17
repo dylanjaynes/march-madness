@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from datetime import datetime, timezone
 
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES, COMPETITIVE_SPREAD_THRESHOLD
 from src.model.predict import (
@@ -28,8 +29,24 @@ with st.sidebar:
     sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
     min_edge = st.slider("Min edge threshold (pts)", 0.0, 10.0, 3.0, 0.5)
     show_passes = st.checkbox("Show Pass-tier bets", value=False)
+    show_nit = st.checkbox("Show NIT games", value=True)
     st.divider()
     st.caption("Half Kelly is recommended to reduce variance.")
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _parse_utc(t) -> datetime:
+    """Parse ISO-8601 string to UTC-aware datetime. Returns epoch if invalid."""
+    if not t:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        s = str(t).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 # ── Load live odds + project ──────────────────────────────────────────────────
@@ -65,9 +82,6 @@ def load_bet_board(year: int):
                 mkt_spread_raw = float(lines.iloc[0]["spread_line"]) if not lines.empty and pd.notna(lines.iloc[0]["spread_line"]) else None
                 mkt_total = float(lines.iloc[0]["total_line"]) if not lines.empty and pd.notna(lines.iloc[0]["total_line"]) else None
 
-                # Convert to model convention (positive = team_a favored).
-                # spread_line is always a positive absolute value.
-                # If spread_favorite == team_a, keep positive. Otherwise negate.
                 if mkt_spread_raw is not None and not lines.empty:
                     fav = str(lines.iloc[0].get("spread_favorite") or "").strip().lower()
                     team_a_name = str(proj.get("team_a") or "").strip().lower()
@@ -80,6 +94,7 @@ def load_bet_board(year: int):
                 proj["spread_edge"] = (proj["projected_spread"] - mkt_spread) if mkt_spread is not None else None
                 proj["total_edge"] = (proj["projected_total"] - mkt_total) if mkt_total is not None else None
                 proj["game_date"] = str(game.get("game_date") or "")
+                proj["is_nit"] = False
                 rows.append(proj)
     else:
         # Seeds: try torvik_ratings first, supplement with tournament_bracket
@@ -96,6 +111,17 @@ def load_bet_board(year: int):
             for _, row in tb_df.iterrows():
                 if row["team"] not in seed_lookup:
                     seed_lookup[row["team"]] = row["seed"]
+
+        # Build set of NCAA tournament teams for NIT detection
+        ncaa_teams = set(tb_df["team"].str.strip().str.lower().tolist()) if not tb_df.empty else set()
+
+        # ── Filter to upcoming games only ─────────────────────────────────────
+        now_utc = datetime.now(timezone.utc)
+        if "commence_time" in odds_df.columns:
+            odds_df = odds_df[
+                odds_df["commence_time"].apply(lambda t: _parse_utc(t) > now_utc)
+            ].copy()
+
         for _, odds in odds_df.iterrows():
             home = odds["home_team"]
             away = odds["away_team"]
@@ -103,13 +129,16 @@ def load_bet_board(year: int):
             mkt_total = odds.get("total_line")
             seed_home = seed_lookup.get(home)
             seed_away = seed_lookup.get(away)
+
+            # Detect NIT: neither team is in the NCAA bracket
+            is_nit = (
+                home.strip().lower() not in ncaa_teams
+                and away.strip().lower() not in ncaa_teams
+            )
+
             proj = project_game(home, away, round_num=1, year=year,
                                 seed_a=seed_home, seed_b=seed_away)
             if "error" not in proj:
-                # Convert spread_home (sportsbook: negative = home favored) to
-                # model convention (positive = team_a favored).
-                # If team_a IS home: negate (home fav -X → team_a fav +X)
-                # If team_a IS away: keep as-is (team_a away fav)
                 if mkt_spread_raw is not None:
                     try:
                         sh = float(mkt_spread_raw)
@@ -126,6 +155,7 @@ def load_bet_board(year: int):
                 proj["spread_edge"] = (proj["projected_spread"] - mkt_spread) if mkt_spread is not None else None
                 proj["total_edge"] = (proj["projected_total"] - mkt_total) if mkt_total is not None else None
                 proj["game_date"] = odds.get("commence_time", "")
+                proj["is_nit"] = is_nit
                 rows.append(proj)
 
     return pd.DataFrame(rows)
@@ -135,7 +165,7 @@ with st.spinner("Loading projections..."):
     df = load_bet_board(current_year)
 
 if df.empty:
-    st.info("No games found. Make sure historical data or live odds are loaded.")
+    st.info("No upcoming games found. Check back when odds are posted.")
     st.stop()
 
 # ── Enrich with bet metrics ───────────────────────────────────────────────────
@@ -148,6 +178,7 @@ for _, row in df.iterrows():
 
     spread_edge = row.get("spread_edge")
     total_edge = row.get("total_edge")
+    is_nit = bool(row.get("is_nit", False))
 
     # Spread bet
     if ps is not None and mkt is not None:
@@ -172,7 +203,7 @@ for _, row in df.iterrows():
     else:
         direction = None
 
-    # Determine the model's recommended bet
+    # Recommended spread bet
     if spread_edge is not None and mkt is not None:
         if float(spread_edge) >= 0:
             pick_team = row["team_a"]
@@ -186,6 +217,7 @@ for _, row in df.iterrows():
 
     is_mismatch = row.get("is_mismatch", False)
     rows_enriched.append({
+        "Tourney": "🏀 NIT" if is_nit else "🏆 NCAA",
         "Game": f"{row['team_a']} vs {row['team_b']}",
         "Pick": pick_str,
         "Round": row.get("round_name", ROUND_NAMES.get(row.get("round_num"), "?")),
@@ -206,15 +238,24 @@ for _, row in df.iterrows():
         "team_a": row["team_a"],
         "team_b": row["team_b"],
         "is_mismatch": is_mismatch,
+        "is_nit": is_nit,
     })
 
 edf = pd.DataFrame(rows_enriched)
+
+# ── NIT filter ────────────────────────────────────────────────────────────────
+if not show_nit:
+    edf = edf[~edf["is_nit"]].copy()
+
+if edf.empty:
+    st.info("No upcoming games match your filters.")
+    st.stop()
 
 # ── Split competitive vs large-spread by market spread threshold ───────────────
 def _is_competitive_row(row):
     mkt = row.get("Market Spread")
     if mkt is None or pd.isna(mkt):
-        return True  # no line yet — include in main table
+        return True
     try:
         return abs(float(mkt)) <= COMPETITIVE_SPREAD_THRESHOLD
     except (TypeError, ValueError):
@@ -245,6 +286,7 @@ strong = (competitive_df["_tier_order"] == 0).sum()
 value = (competitive_df["_tier_order"] == 1).sum()
 lean = (competitive_df["_tier_order"] == 2).sum()
 total_allocated = competitive_df["Bet ($)"].sum()
+nit_count = competitive_df["is_nit"].sum()
 
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("🔥 Strong Bets", strong)
@@ -253,18 +295,27 @@ k3.metric("📊 Lean Bets", lean)
 k4.metric("Total Bets", strong + value + lean)
 k5.metric("Total Allocated", f"${total_allocated:,.0f}")
 
+if nit_count > 0:
+    st.info(
+        f"🏀 **{nit_count} NIT game{'s' if nit_count != 1 else ''} included** — "
+        "NIT backtest shows 68.5% ATS at Edge≥3 (37-17 across 2021–2025), "
+        "but sample is smaller and model has less seeding signal for these games. "
+        "Treat NIT picks with extra caution.",
+        icon="ℹ️",
+    )
+
 st.divider()
 
 # ── Main table ────────────────────────────────────────────────────────────────
 display_cols = [
-    "Tier", "Game", "Pick", "Round", "Date",
+    "Tier", "Tourney", "Game", "Pick", "Round", "Date",
     "Model Spread", "Market Spread", "Edge (pts)",
     "Cov Prob", "Half Kelly %", "Bet ($)",
     "Win Prob A",
 ]
 show_df = edf[[c for c in display_cols if c in edf.columns]].copy()
 
-# Color-code by tier
+
 def tier_color(val):
     if "Strong" in str(val):
         return "background-color: #1a472a; color: white"
@@ -274,11 +325,21 @@ def tier_color(val):
         return "background-color: #3d2b1f; color: white"
     return ""
 
+
+def tourney_color(val):
+    if "NIT" in str(val):
+        return "color: #888; font-style: italic"
+    return ""
+
+
 st.dataframe(
-    show_df.style.applymap(tier_color, subset=["Tier"]),
+    show_df.style
+        .applymap(tier_color, subset=["Tier"])
+        .applymap(tourney_color, subset=["Tourney"]),
     use_container_width=True,
     hide_index=True,
     column_config={
+        "Tourney": st.column_config.TextColumn(label="", width="small"),
         "Pick": st.column_config.TextColumn(label="Model Pick", width="medium"),
         "Model Spread": st.column_config.NumberColumn(format="%.1f"),
         "Market Spread": st.column_config.NumberColumn(format="%.1f"),
@@ -296,9 +357,14 @@ st.divider()
 if not competitive_df.empty and competitive_df["Edge (pts)"].notna().any():
     st.subheader("Edge Distribution")
     chart_df = competitive_df[competitive_df["Edge (pts)"].notna()].sort_values("Edge (pts)", ascending=False)
+    # Add NIT indicator to game label in chart
+    chart_df = chart_df.copy()
+    chart_df["Game Label"] = chart_df.apply(
+        lambda r: f"{r['Game']} (NIT)" if r["is_nit"] else r["Game"], axis=1
+    )
     fig = px.bar(
         chart_df,
-        x="Game",
+        x="Game Label",
         y="Edge (pts)",
         color="Tier",
         color_discrete_map={"🔥 Strong": "#2ecc71", "✅ Value": "#3498db",
@@ -314,7 +380,7 @@ totals_df = edf[edf["Total Edge"].notna()].copy()
 if not totals_df.empty:
     st.divider()
     st.subheader("O/U Edges")
-    ou_cols = ["Game", "Round", "Model Total", "Market Total", "Total Edge", "O/U Pick"]
+    ou_cols = ["Tourney", "Game", "Round", "Model Total", "Market Total", "Total Edge", "O/U Pick"]
     st.dataframe(
         totals_df[[c for c in ou_cols if c in totals_df.columns]]
         .sort_values("Total Edge", key=lambda s: s.abs(), ascending=False),
@@ -332,7 +398,7 @@ with st.expander(
         "The model's edge on these is noise, not skill."
     )
     if not mismatch_df.empty:
-        disp_cols = ["Game", "Round", "Date", "Model Spread", "Market Spread", "Edge (pts)"]
+        disp_cols = ["Tourney", "Game", "Round", "Date", "Model Spread", "Market Spread", "Edge (pts)"]
         st.dataframe(
             mismatch_df[[c for c in disp_cols if c in mismatch_df.columns]],
             use_container_width=True,
@@ -346,5 +412,6 @@ st.caption(
     "**How to read this:** Edge = Model Spread – Market Spread (positive = model likes Team A). "
     "Coverage probability uses a Normal distribution with σ=12 pts (backtest RMSE). "
     "Kelly% is Half Kelly applied to bankroll. "
-    "Tiers: 🔥 Strong (|edge|≥7, cov≥58%) · ✅ Value (≥5, ≥56%) · 📊 Lean (≥3, ≥54%)"
+    "Tiers: 🔥 Strong (|edge|≥7, cov≥58%) · ✅ Value (≥5, ≥56%) · 📊 Lean (≥3, ≥54%) · "
+    "🏀 NIT = National Invitation Tournament (model backtest: 68.5% ATS at edge≥3, smaller sample)"
 )
