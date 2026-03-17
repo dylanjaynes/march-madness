@@ -62,7 +62,7 @@ with st.sidebar:
     date_filter = st.sidebar.radio(
         "Show games",
         ["Today", "Tomorrow", "All upcoming"],
-        index=0,
+        index=2,
     )
 
 
