@@ -62,7 +62,7 @@ with st.sidebar:
     date_filter = st.sidebar.radio(
         "Show games",
         ["Today", "Tomorrow", "All upcoming"],
-        index=2,
+        index=0,
     )
 
 
@@ -189,7 +189,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             local_dt = dt.astimezone(EST)
             date_key   = local_dt.strftime("%Y-%m-%d")
             date_label = local_dt.strftime("%A, %b %d")
-            time_label = local_dt.strftime("%I:%M %p ET").lstrip("0")
+            time_label = local_dt.strftime("%I:%M %p").lstrip("0")
             days_out   = (dt.date() - now_utc.date()).days
             is_live    = dt <= now_utc   # tip-off time has passed
         except Exception:
@@ -361,7 +361,7 @@ hcol1, hcol2 = st.columns([5, 1])
 with hcol1:
     st.caption(
         f"{season_label(current_year)} · {data_as_of(current_year)} · "
-        f"Auto-refreshes every 2 min · {datetime.now(timezone.utc).astimezone(EST).strftime('%I:%M %p ET').lstrip('0')}"
+        f"Auto-refreshes every 2 min · {datetime.now().strftime('%H:%M:%S')}"
     )
 with hcol2:
     if st.button("🔄 Refresh", use_container_width=True):
