@@ -497,7 +497,8 @@ def _build_bracket_vis(region_all_rounds: dict) -> dict:
             for gi in range(len(teams) // 2):
                 ta, sa = teams[gi * 2]
                 tb, sb = teams[gi * 2 + 1]
-                wp_a = _wp_cache.get((ta, tb), 1.0 - _wp_cache.get((tb, ta), 0.5))
+                rn = ri + 1  # ri is 0-based; round_num is 1-based
+                wp_a = _wp_cache.get((ta, tb, rn), 1.0 - _wp_cache.get((tb, ta, rn), 0.5))
                 winner = 'a' if ta in next_teams else 'b'
 
                 # Spread: from each team's perspective (cache keyed by better-seed-first)
@@ -636,12 +637,14 @@ def _build_full_bracket_html(bracket_vis: dict, f4_games: list, champion: tuple,
 
 
 # ── Simulation helpers ─────────────────────────────────────────────────────────
-# Win probability cache: (ta, tb) -> float.  Populated once before any simulation.
+# Win probability cache: (ta, tb, round_num) -> float.  Populated once before any simulation.
+# Keyed by round so early-round games use round 1 features, not Sweet 16 features.
 _wp_cache: dict = {}
-# Spread cache: (ta, tb) -> float, where ta = better seed (lower number).
+# Spread cache: (ta, tb, round_num) -> float, where ta = better seed (lower number).
 # Positive spread = ta is favored by that many points.
 _spread_cache: dict = {}
 # Total cache: (ta, tb) -> float (game total, symmetric).
+# Totals don't change meaningfully by round so we keep a single round-agnostic entry.
 _total_cache: dict = {}
 
 def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
@@ -653,12 +656,13 @@ def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
     chaos: 0 = pure model, 100 = coin flip. Interpolates between model and 0.5.
     """
     if use_cache:
-        # Cache is keyed (ta, tb) regardless of round — uses round 3 as proxy
-        key = (ta, tb)
+        # Cache is keyed (ta, tb, round_num) — correct round features for each stage
+        key = (ta, tb, round_num)
+        rev = (tb, ta, round_num)
         if key in _wp_cache:
             raw_wp = _wp_cache[key]
-        elif (tb, ta) in _wp_cache:
-            raw_wp = 1.0 - _wp_cache[(tb, ta)]
+        elif rev in _wp_cache:
+            raw_wp = 1.0 - _wp_cache[rev]
         else:
             raw_wp = 0.5
     else:
@@ -673,11 +677,21 @@ def _get_win_prob(ta: str, sa: int, tb: str, sb: int, round_num: int,
 
 def _precompute_win_probs(seed_teams_by_region: dict) -> None:
     """
-    Pre-compute all pairwise win probabilities for every team in the bracket.
-    With 16 teams per region × 4 regions = 64 teams → at most ~2016 matchups.
+    Pre-compute all pairwise win probabilities for every team in the bracket,
+    for each of the 6 tournament rounds.
 
-    Vectorized: builds all feature vectors first, then does a single batch
-    model.predict() call instead of loading models 2016 times.
+    With 16 teams per region × 4 regions = 64 teams → ~2016 matchups × 6 rounds
+    = ~12,096 predictions. Still fast because:
+      - Team ratings are loaded once from DB before the loop.
+      - The round_number column is the only feature that changes per round,
+        so feature building is cheap (no extra DB hits).
+      - All predictions are batched per round in a single model.predict() call.
+
+    Cache key: (ta, tb, round_num) so simulate_region and simulate_final_four
+    look up the correct round's probability at each stage.
+    Spread and total caches remain round-agnostic (keyed (ta, tb)) because
+    the display only ever shows one spread per matchup and totals don't shift
+    meaningfully across rounds.
     """
     all_teams = []  # list of (team, seed)
     for region, seed_team in seed_teams_by_region.items():
@@ -685,7 +699,7 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             if team:
                 all_teams.append((team, seed))
 
-    # Batch-load all team ratings in one DB query
+    # Batch-load all team ratings in one DB query (done once, shared across all rounds)
     all_team_names = [t for t, s in all_teams]
     clear_ratings_cache()
     load_ratings_cache(all_team_names, current_year)
@@ -701,45 +715,83 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
             else:
                 pairs.append((tb, sb, ta, sa))
 
-    total = len(pairs)
+    n_pairs = len(pairs)
+    n_rounds = 6
+    total_steps = n_pairs * n_rounds
     bar = st.progress(0.0, text="Pre-computing win probabilities — building features...")
 
-    # Build all feature vectors (fast: uses ratings cache, no model loading)
-    feat_rows = []
-    valid_pairs = []
-    for idx, (ta, sa, tb, sb) in enumerate(pairs):
-        feats = build_matchup_features(ta, tb, current_year, round_num=3,
-                                       seed_a=sa, seed_b=sb)
-        if not feats.isna().all():
-            feat_rows.append(feats[MATCHUP_FEATURES].values)
-            valid_pairs.append((ta, sa, tb, sb))
-        else:
-            # No ratings — default to 50/50
-            _wp_cache[(ta, tb)] = 0.5
-            _wp_cache[(tb, ta)] = 0.5
-        if (idx + 1) % 100 == 0 or (idx + 1) == total:
-            bar.progress((idx + 1) / total / 2,  # first half = feature building
-                         text=f"Building features ({idx + 1}/{total})...")
+    # Load hybrid models once outside the round loop
+    try:
+        comp_model = load_model("spread_competitive")
+        mis_model  = load_model("spread_mismatch")
+        cal_comp   = load_model("cal_competitive")
+        cal_mis    = load_model("cal_mismatch")
+        use_hybrid = True
+    except FileNotFoundError:
+        try:
+            legacy_model = load_model("spread_model")
+        except FileNotFoundError:
+            legacy_model = None
+        use_hybrid = False
 
-    if feat_rows:
-        bar.progress(0.5, text="Running model predictions...")
-        # Single batch predict for all matchups using hybrid model routing.
+    try:
+        total_model = load_model("total_model")
+        from src.features.adjustments import apply_tournament_pace_adjustment
+        has_total_model = True
+    except Exception:
+        has_total_model = False
+
+    steps_done = 0
+
+    for round_num in range(1, n_rounds + 1):
+
+        # ── Build feature matrix for this round ───────────────────────────────
+        feat_rows   = []
+        valid_pairs = []
+
+        for idx, (ta, sa, tb, sb) in enumerate(pairs):
+            feats = build_matchup_features(
+                ta, tb, current_year,
+                round_num=round_num,   # ← correct round for each stage
+                seed_a=sa, seed_b=sb,
+            )
+            if not feats.isna().all():
+                feat_rows.append(feats[MATCHUP_FEATURES].values)
+                valid_pairs.append((ta, sa, tb, sb))
+            else:
+                # No ratings — default 50/50 for this round
+                _wp_cache[(ta, tb, round_num)] = 0.5
+                _wp_cache[(tb, ta, round_num)] = 0.5
+
+            steps_done += 1
+            if steps_done % 200 == 0 or steps_done == total_steps:
+                pct = steps_done / total_steps
+                bar.progress(
+                    pct,
+                    text=f"Round {round_num}/6 — building features "
+                         f"({idx + 1}/{n_pairs})...",
+                )
+
+        if not feat_rows:
+            continue
+
+        # ── Batch predict for this round ──────────────────────────────────────
+        bar.progress(
+            steps_done / total_steps,
+            text=f"Round {round_num}/6 — running predictions...",
+        )
+
         try:
             X = np.array(feat_rows)
 
-            # Build mismatch mask from seed_diff (and barthag_diff if available)
+            # Mismatch routing (same logic as before — seed_diff doesn't change by round)
             seed_diffs = np.array([abs(sa - sb) for (ta, sa, tb, sb) in valid_pairs])
             is_mismatch = seed_diffs >= MISMATCH_SEED_DIFF_THRESHOLD
             if "barthag_diff" in MATCHUP_FEATURES:
                 bidx = list(MATCHUP_FEATURES).index("barthag_diff")
                 is_mismatch = is_mismatch | (np.abs(X[:, bidx]) >= MISMATCH_BARTHAG_THRESHOLD)
 
-            # Load hybrid models; fall back to legacy spread_model if missing
-            try:
-                comp_model = load_model("spread_competitive")
-                mis_model = load_model("spread_mismatch")
-                cal_comp = load_model("cal_competitive")
-                cal_mis = load_model("cal_mismatch")
+            if use_hybrid:
                 spreads = np.zeros(len(X))
                 if is_mismatch.any():
                     spreads[is_mismatch] = cal_mis.predict(
@@ -749,47 +801,60 @@ def _precompute_win_probs(seed_teams_by_region: dict) -> None:
                     spreads[~is_mismatch] = cal_comp.predict(
                         comp_model.predict(X[~is_mismatch])
                     )
-            except FileNotFoundError:
-                spreads = load_model("spread_model").predict(X)
+            elif legacy_model is not None:
+                spreads = legacy_model.predict(X)
+            else:
+                spreads = np.zeros(len(X))
 
-            # Also compute totals (pace-adjusted)
-            try:
-                total_model = load_model("total_model")
-                from src.features.adjustments import apply_tournament_pace_adjustment
+            # Totals — only compute once (round 1), reuse for display cache
+            if round_num == 1 and has_total_model:
                 raw_totals = total_model.predict(X)
-                totals = np.array([apply_tournament_pace_adjustment(float(t)) for t in raw_totals])
-            except Exception:
+                totals = np.array(
+                    [apply_tournament_pace_adjustment(float(t)) for t in raw_totals]
+                )
+            else:
                 totals = np.full(len(X), np.nan)
 
             for (ta, sa, tb, sb), spread, tot in zip(valid_pairs, spreads, totals):
                 wp_a = spread_to_win_prob(float(spread))
-                _wp_cache[(ta, tb)] = wp_a
-                _wp_cache[(tb, ta)] = 1.0 - wp_a
-                # Spread: ta is always the better seed (pairs built with sa<=sb)
-                _spread_cache[(ta, tb)] = float(spread)   # positive = ta favored
-                _spread_cache[(tb, ta)] = -float(spread)  # from tb's perspective
-                if not np.isnan(tot):
-                    _total_cache[(ta, tb)] = float(tot)
-                    _total_cache[(tb, ta)] = float(tot)
-        except Exception as e:
-            # Fallback: compute individually if batch fails
+
+                # Win prob keyed by round
+                _wp_cache[(ta, tb, round_num)] = wp_a
+                _wp_cache[(tb, ta, round_num)] = 1.0 - wp_a
+
+                # Spread display cache — only written once (round 1 is fine; spread
+                # shifts slightly by round but display doesn't need per-round values)
+                if round_num == 1:
+                    _spread_cache[(ta, tb)] = float(spread)
+                    _spread_cache[(tb, ta)] = -float(spread)
+                    if not np.isnan(tot):
+                        _total_cache[(ta, tb)] = float(tot)
+                        _total_cache[(tb, ta)] = float(tot)
+
+        except Exception:
+            # Fallback: individual calls if batch fails for this round
             for ta, sa, tb, sb in valid_pairs:
-                proj = project_game(ta, tb, round_num=3, year=current_year, seed_a=sa, seed_b=sb)
+                proj = project_game(
+                    ta, tb, round_num=round_num, year=current_year,
+                    seed_a=sa, seed_b=sb,
+                )
                 if "error" not in proj:
-                    wp_a = proj.get("win_prob_a", 0.5)
+                    wp_a   = proj.get("win_prob_a", 0.5)
                     spread = proj.get("projected_spread", 0.0)
                     total  = proj.get("projected_total", None)
                 else:
                     wp_a, spread, total = 0.5, 0.0, None
-                _wp_cache[(ta, tb)] = wp_a
-                _wp_cache[(tb, ta)] = 1.0 - wp_a
-                _spread_cache[(ta, tb)] = spread
-                _spread_cache[(tb, ta)] = -spread
-                if total is not None:
-                    _total_cache[(ta, tb)] = total
-                    _total_cache[(tb, ta)] = total
 
-    bar.progress(1.0, text=f"Done — {total} matchups pre-computed.")
+                _wp_cache[(ta, tb, round_num)] = wp_a
+                _wp_cache[(tb, ta, round_num)] = 1.0 - wp_a
+                if round_num == 1:
+                    _spread_cache[(ta, tb)] = spread
+                    _spread_cache[(tb, ta)] = -spread
+                    if total is not None:
+                        _total_cache[(ta, tb)] = total
+                        _total_cache[(tb, ta)] = total
+
+    bar.progress(1.0, text=f"Done — {n_pairs} matchups × 6 rounds pre-computed.")
     bar.empty()
 
 
@@ -1000,9 +1065,9 @@ if run_btn:
             fav, fs, dog, ds = ta, sa, tb, sb
         else:
             fav, fs, dog, ds = tb, sb, ta, sa
-        wp = _wp_cache.get((fav, dog), _wp_cache.get((dog, fav), 0.5))
-        if (fav, dog) not in _wp_cache and (dog, fav) in _wp_cache:
-            wp = 1.0 - _wp_cache[(dog, fav)]
+        wp = _wp_cache.get((fav, dog, 5), _wp_cache.get((dog, fav, 5), 0.5))
+        if (fav, dog, 5) not in _wp_cache and (dog, fav, 5) in _wp_cache:
+            wp = 1.0 - _wp_cache[(dog, fav, 5)]
         if chaos > 0:
             alpha = (chaos / 100) ** 2  # quadratic: gentler at low values
             wp = alpha * 0.5 + (1 - alpha) * wp
@@ -1033,7 +1098,7 @@ if run_btn:
             cf, cfs, cd, cds = c1['team'], c1['seed'], c2['team'], c2['seed']
         else:
             cf, cfs, cd, cds = c2['team'], c2['seed'], c1['team'], c1['seed']
-        wp_champ = _wp_cache.get((cf, cd), 1.0 - _wp_cache.get((cd, cf), 0.5))
+        wp_champ = _wp_cache.get((cf, cd, 6), 1.0 - _wp_cache.get((cd, cf, 6), 0.5))
         sp_champ = _spread_cache.get((cf, cd))
         if sp_champ is None and (cd, cf) in _spread_cache:
             sp_champ = -_spread_cache[(cd, cf)]
