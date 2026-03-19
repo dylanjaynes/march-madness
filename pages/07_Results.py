@@ -113,7 +113,7 @@ def _date_label(d: str) -> str:
 
 def _fetch_and_store_results(year: int) -> int:
     """Scrape Sports Reference for tournament results and upsert into DB."""
-    from src.ingest.fetch_live_scores import fetch_and_store_scores
+    from src.ingest.odds import fetch_and_store_scores
     df = fetch_and_store_scores(year, days_from=3)
     if df.empty:
         return 0
@@ -350,7 +350,7 @@ with st.sidebar:
     if st.button(f"📥 Fetch {selected_year} results", use_container_width=True,
                  help="Grab the latest tournament scores"):
         with st.spinner(f"Fetching {selected_year} results from The-Odds-API"):
-            from src.ingest.fetch_live_scores import fetch_and_store_scores
+            from src.ingest.odds import fetch_and_store_scores
             try:
                 n = fetch_and_store_scores(selected_year)
                 st.cache_data.clear()
