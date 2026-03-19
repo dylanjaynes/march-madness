@@ -113,8 +113,8 @@ def _date_label(d: str) -> str:
 
 def _fetch_and_store_results(year: int) -> int:
     """Scrape Sports Reference for tournament results and upsert into DB."""
-    from src.ingest.historical import scrape_tournament_results
-    df = scrape_tournament_results(year)
+    from src.ingest.fetch_live_scores import fetch_and_store_scores
+    df = fetch_and_store_scores(year, days_from=3)
     if df.empty:
         return 0
     # Delete existing and reinsert (scraper is idempotent)
