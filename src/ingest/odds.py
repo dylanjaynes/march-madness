@@ -308,6 +308,8 @@ def fetch_and_store_scores(year: int, days_from: int = 3) -> dict:
     """
     from src.ingest.fetch_live_scores import ingest_live_scores
     summary = ingest_live_scores(year=year, days_from=days_from)
+    from src.ingest.odds_historical import ingest_all_historical_odds
+    ingest_all_historical_odds(year)
     return {
         "results": summary.get("results_inserted", 0),
         "lines":   summary.get("lines_inserted", 0),
