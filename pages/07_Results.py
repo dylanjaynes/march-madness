@@ -350,8 +350,9 @@ with st.sidebar:
     if st.button(f"📥 Fetch {selected_year} results", use_container_width=True,
                  help="Scrapes Sports Reference for the latest tournament scores"):
         with st.spinner(f"Fetching {selected_year} results from Sports Reference…"):
+            from src.ingest.fetch_live_scores import fetch_and_store_scores
             try:
-                n = _fetch_and_store_results(selected_year)
+                n = fetch_and_store_scores(selected_year)
                 st.cache_data.clear()
                 st.success(f"Fetched {n} games for {selected_year}")
                 st.rerun()
