@@ -348,8 +348,8 @@ with st.sidebar:
 
     # Fetch/refresh results for selected year
     if st.button(f"📥 Fetch {selected_year} results", use_container_width=True,
-                 help="Scrapes Sports Reference for the latest tournament scores"):
-        with st.spinner(f"Fetching {selected_year} results from Sports Reference…"):
+                 help="Grab the latest tournament scores"):
+        with st.spinner(f"Fetching {selected_year} results from The-Odds-API"):
             from src.ingest.fetch_live_scores import fetch_and_store_scores
             try:
                 n = fetch_and_store_scores(selected_year)
