@@ -145,7 +145,7 @@ if submitted:
         c1, c2, c3 = st.columns(3)
         with c1:
             sign = "+" if ps >= 0 else ""
-            st.metric("Model Spread", f"{team_a} {sign}{ps:.1f}")
+            st.metric("Model Spread", f"{sign}{ps:.1f} {team_a}")
         with c2:
             st.metric("Model Total", f"{pt:.1f}")
         with c3:
