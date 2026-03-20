@@ -75,12 +75,12 @@ with st.form("matchup_form"):
             help="The over/under line. Leave 0 to skip.",
         )
     with col6:
-        seed_a = st.number.input(
+        seed_a = st.number_input(
             "Team A Seed (If NCAAT / Optional)", value=0.0, step=1, max=16,
             help="Leave 0.0 if not tournament"
         )
     with col7:
-        seed_b = st.number.input(
+        seed_b = st.number_input(
             "Team B Seed (If NCAAT / Optional)", value=0.0, step=1, max=16,
             help="Leave 0.0 if not tournament"
         )
