@@ -124,6 +124,33 @@ def apply_recency_weighting(team: str, year: int, decay_halflife_days: int = 30)
     }
 
 
+def get_season_averages(team: str, year: int) -> dict:
+    """
+    Return season-average efficiency stats for a team from torvik_ratings.
+    Used by the live model to compare in-game stats vs season baseline.
+    Returns: {efg_o, efg_d, to_rate_o, to_rate_d, or_rate_o, or_rate_d} or empty dict.
+    """
+    try:
+        df = query_df(
+            "SELECT efg_o, efg_d, to_rate_o, to_rate_d, or_rate_o, or_rate_d "
+            "FROM torvik_ratings WHERE year = ? AND team = ? LIMIT 1",
+            params=[year, team],
+        )
+        if df.empty:
+            return {}
+        row = df.iloc[0]
+        return {
+            "efg_o":      row["efg_o"],
+            "efg_d":      row["efg_d"],
+            "to_rate_o":  row["to_rate_o"],
+            "to_rate_d":  row["to_rate_d"],
+            "or_rate_o":  row["or_rate_o"],
+            "or_rate_d":  row["or_rate_d"],
+        }
+    except Exception:
+        return {}
+
+
 def get_national_averages(year: int) -> dict:
     """Compute national average efficiency stats for a season."""
     sql = "SELECT * FROM torvik_ratings WHERE year = ?"

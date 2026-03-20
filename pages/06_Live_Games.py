@@ -170,7 +170,7 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
         return pd.DataFrame(), []
 
     pregame_ref = pregame_ref or {}
-    rows, errors, skipped_blowouts = [], [], []
+    rows, errors = [], []
     now_utc = datetime.now(timezone.utc)
     # Seed map: used when torvik_ratings.seed is NULL (current year before data refresh)
     bracket_seeds = load_bracket_seed_map(yr)
@@ -181,14 +181,12 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
         mkt_spread_home = game.get("spread_home")
         mkt_total = game.get("total_line")
 
-        # Skip blowout mismatches — model has no consistent edge on large spreads
+        # Flag large-spread games — model has less consistent edge, shown with a note
+        is_large_spread = False
         if mkt_spread_home is not None:
             try:
                 if abs(float(mkt_spread_home)) > COMPETITIVE_SPREAD_THRESHOLD:
-                    skipped_blowouts.append(
-                        f"{home} vs {away} (line: {float(mkt_spread_home):+.1f} pts)"
-                    )
-                    continue
+                    is_large_spread = True
             except (TypeError, ValueError):
                 pass
         commence = str(game.get("commence_time", ""))
@@ -360,9 +358,10 @@ def build_projections(round_ctx: int, yr: int, bankroll_: int, sizing_: str,
             "mkt_total":      pregame_total,  # keep backward compat
             "total_edge":     total_edge,
             "total_moved":    total_moved,
+            "is_large_spread": is_large_spread,
         })
 
-    return pd.DataFrame(rows), errors, skipped_blowouts
+    return pd.DataFrame(rows), errors
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -388,8 +387,8 @@ with st.spinner("Loading games..."):
     _game_ids = tuple(_live_df["game_id"].tolist()) if not _live_df.empty else ()
     _pregame_ref = load_pregame_reference(_game_ids)
     # 4. Build full projections (cached 2 min)
-    df, errors, skipped_blowouts = build_projections(round_context, current_year, bankroll, sizing,
-                                                     pregame_ref=_pregame_ref)
+    df, errors = build_projections(round_context, current_year, bankroll, sizing,
+                                   pregame_ref=_pregame_ref)
 
 if df.empty:
     st.warning("No upcoming NCAAB games found.")
@@ -520,12 +519,17 @@ for date, tab in zip(dates, date_tabs):
             c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
 
             with c1:
+                large_spread_note = (
+                    "<br><span style='color:#f39c12;font-size:0.75rem'>⚠️ Large spread — projection may be less accurate</span>"
+                    if row.get("is_large_spread") else ""
+                )
                 st.markdown(
                     f"<div style='padding:4px 0'>"
                     f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span>"
                     f"<span style='margin-left:8px;background:#c0392b;color:#fff;"
                     f"font-size:0.65rem;font-weight:bold;padding:2px 6px;border-radius:4px'>🔴 LIVE</span><br>"
                     f"<span style='color:#aaa;font-size:0.8rem'>Started {row['time']}</span>"
+                    f"{large_spread_note}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -641,10 +645,15 @@ for date, tab in zip(dates, date_tabs):
                 c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
 
                 with c1:
+                    large_spread_note = (
+                        "<br><span style='color:#f39c12;font-size:0.75rem'>⚠️ Large spread — projection may be less accurate</span>"
+                        if row.get("is_large_spread") else ""
+                    )
                     st.markdown(
                         f"<div style='padding:4px 0'>"
                         f"<span style='font-weight:bold;font-size:1rem'>{row['matchup']}</span><br>"
                         f"<span style='color:#aaa;font-size:0.8rem'>{row['date_label']} · {row['time']}</span>"
+                        f"{large_spread_note}"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -724,19 +733,6 @@ for date, tab in zip(dates, date_tabs):
                 elif ou_str:
                     st.caption(f"&nbsp;&nbsp;&nbsp;{ou_str}")
                 st.divider()
-
-# ── Large-spread games (hidden from feed) ─────────────────────────────────────
-if skipped_blowouts:
-    with st.expander(
-        f"⚠️ {len(skipped_blowouts)} large-spread game(s) hidden",
-        expanded=False,
-    ):
-        st.caption(
-            f"Games with |spread| > {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts are "
-            "excluded — the model has no consistent edge on blowout mismatches."
-        )
-        for g in skipped_blowouts:
-            st.write(f"• {g}")
 
 # ── Errors ────────────────────────────────────────────────────────────────────
 if errors:

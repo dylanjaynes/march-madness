@@ -176,6 +176,76 @@ CREATE TABLE IF NOT EXISTS predictions (
     spread_result TEXT,
     total_result TEXT
 );
+
+CREATE TABLE IF NOT EXISTS halftime_scores (
+    year           INTEGER,
+    game_date      TEXT,
+    team1          TEXT,
+    team2          TEXT,
+    espn_game_id   TEXT,
+    h1_score1      INTEGER,
+    h1_score2      INTEGER,
+    h1_margin      REAL,
+    h1_combined    INTEGER,
+    h1_efg1        REAL,
+    h1_efg2        REAL,
+    h1_orb1        INTEGER,
+    h1_orb2        INTEGER,
+    h1_to1         INTEGER,
+    h1_to2         INTEGER,
+    source         TEXT,
+    PRIMARY KEY (year, game_date, team1, team2)
+);
+
+CREATE TABLE IF NOT EXISTS live_game_snapshots (
+    snapshot_id    TEXT PRIMARY KEY,
+    espn_game_id   TEXT,
+    game_date      TEXT,
+    team1          TEXT,
+    team2          TEXT,
+    snapshot_ts    TIMESTAMP,
+    period         INTEGER,
+    clock_secs     INTEGER,
+    score1         INTEGER,
+    score2         INTEGER,
+    current_margin REAL,
+    time_elapsed   REAL,
+    time_remaining REAL,
+    efg_pct1       REAL,
+    efg_pct2       REAL,
+    orb1           INTEGER,
+    orb2           INTEGER,
+    to1            INTEGER,
+    to2            INTEGER,
+    game_status    TEXT,
+    live_spread    REAL,
+    live_total     REAL,
+    pregame_spread REAL,
+    projected_total REAL
+);
+
+CREATE TABLE IF NOT EXISTS live_predictions (
+    prediction_id     TEXT PRIMARY KEY,
+    snapshot_id       TEXT,
+    espn_game_id      TEXT,
+    game_date         TEXT,
+    team1             TEXT,
+    team2             TEXT,
+    time_elapsed      REAL,
+    time_remaining    REAL,
+    game_status       TEXT,
+    projected_margin  REAL,
+    live_market_spread REAL,
+    edge              REAL,
+    tier              TEXT,
+    kelly_pct         REAL,
+    bet_team          TEXT,
+    component_time_weight   REAL,
+    component_efg_adj       REAL,
+    component_orb_adj       REAL,
+    component_to_adj        REAL,
+    created_at        TIMESTAMP
+);
 """
 
 
@@ -201,6 +271,12 @@ def db_conn():
 def init_db():
     with db_conn() as conn:
         conn.executescript(DDL)
+        # Migration: add espn_game_id to historical_results if not present
+        try:
+            conn.execute("ALTER TABLE historical_results ADD COLUMN espn_game_id TEXT")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
     print(f"Database initialized at {DB_PATH}")
 
 

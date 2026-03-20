@@ -299,21 +299,22 @@ if edf.empty:
     st.info("No upcoming games match your filters.")
     st.stop()
 
-# ── Split competitive vs large-spread by market spread threshold ───────────────
-def _is_competitive_row(row):
+# ── Flag large-spread rows (include in main table with note) ──────────────────
+def _is_large_spread_row(row):
     mkt = row.get("Market Spread")
     if mkt is None or pd.isna(mkt):
-        return True
+        return False
     try:
-        return abs(float(mkt)) <= COMPETITIVE_SPREAD_THRESHOLD
+        return abs(float(mkt)) > COMPETITIVE_SPREAD_THRESHOLD
     except (TypeError, ValueError):
-        return True
+        return False
 
-edf["_competitive"] = edf.apply(_is_competitive_row, axis=1)
-competitive_df = edf[edf["_competitive"]].copy()
-mismatch_df    = edf[~edf["_competitive"]].copy()
+edf["_large_spread"] = edf.apply(_is_large_spread_row, axis=1)
+# Keep mismatch_df alias for the expander note below
+mismatch_df = edf[edf["_large_spread"]].copy()
+competitive_df = edf.copy()  # all games included
 
-# ── Filter (apply only to competitive) ───────────────────────────────────────
+# ── Filter ────────────────────────────────────────────────────────────────────
 if not show_passes:
     competitive_df = competitive_df[competitive_df["_tier_order"] < 3]
 
@@ -326,7 +327,7 @@ competitive_df = competitive_df.sort_values(
     ascending=[True, False],
 )
 
-# Keep edf alias pointing at competitive for legacy references below
+# Keep edf alias for legacy references below
 edf = competitive_df
 
 # ── Summary row ───────────────────────────────────────────────────────────────
@@ -436,24 +437,11 @@ if not totals_df.empty:
         hide_index=True,
     )
 
-with st.expander(
-    f"⚠️ Large-spread games — {len(mismatch_df)} games (|spread| > {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts)",
-    expanded=False,
-):
+if not mismatch_df.empty:
     st.caption(
-        f"Games where the market spread exceeds {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts. "
-        "Backtest shows 59.6% ATS on 52 such games — not enough signal to bet confidently. "
-        "The model's edge on these is noise, not skill."
+        f"⚠️ {len(mismatch_df)} game(s) with |spread| > {COMPETITIVE_SPREAD_THRESHOLD:.0f} pts are included above. "
+        "Backtest shows 59.6% ATS on these — projection may be less accurate. Use extra caution."
     )
-    if not mismatch_df.empty:
-        disp_cols = ["Tourney", "Game", "Round", "Date", "Model Spread", "Market Spread", "Edge (pts)"]
-        st.dataframe(
-            mismatch_df[[c for c in disp_cols if c in mismatch_df.columns]],
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("No large-spread games today.")
 
 st.divider()
 st.caption(
