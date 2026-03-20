@@ -5,14 +5,20 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-
+from src.model.train import load_model
 from src.utils.config import TOURNAMENT_YEARS, ROUND_NAMES
 from src.model.predict import (
     project_game, coverage_probability, kelly_fraction, half_kelly,
     bet_tier, season_label, data_as_of,
 )
 from src.utils.db import query_df
-
+from src.utils.config import (
+    TOURNAMENT_YEARS, MISMATCH_SEED_DIFF_THRESHOLD, MISMATCH_BARTHAG_THRESHOLD,
+)
+from src.model.predict import project_game, season_label, data_as_of, spread_to_win_prob
+from src.model.train import load_model
+from src.features.matchup import build_matchup_features, MATCHUP_FEATURES
+import numpy as np
 st.set_page_config(page_title="Matchup Builder", page_icon="⚔️", layout="wide")
 st.title("⚔️ Matchup Builder")
 
@@ -96,12 +102,101 @@ with st.form("matchup_form"):
         )
 
     submitted = st.form_submit_button("Project Matchup", type="primary", use_container_width=True)
+#
+#  Load hybrid models once outside the round loop
+    try:
+        comp_model = load_model("spread_competitive")
+        mis_model  = load_model("spread_mismatch")
+        cal_comp   = load_model("cal_competitive")
+        cal_mis    = load_model("cal_mismatch")
+        use_hybrid = True
+    except FileNotFoundError:
+        try:
+            legacy_model = load_model("spread_model")
+        except FileNotFoundError:
+            legacy_model = None
+        use_hybrid = False
 
+    try:
+        total_model = load_model("total_model")
+        from src.features.adjustments import apply_tournament_pace_adjustment
+        has_total_model = True
+    except Exception:
+        has_total_model = False
 # ── Projection ────────────────────────────────────────────────────────────────
 if submitted:
     # Seeds are auto-looked up from DB — never user-controlled,
     # because seed_diff is a model feature and arbitrary seeds distort predictions.
     with st.spinner("Running projection..."):
+
+# ── Build feature matrix for this round ───────────────────────────────
+        feat_rows   = []
+        valid_pairs = []
+
+        # ── Simulation helpers ─────────────────────────────────────────────────────────
+        # Win probability cache: (ta, tb, round_num) -> float.  Populated once before any simulation.
+        # Keyed by round so early-round games use round 1 features, not Sweet 16 features.
+        _wp_cache: dict = {}
+        # Spread cache: (ta, tb, round_num) -> float, where ta = better seed (lower number).
+        # Positive spread = ta is favored by that many points.
+        _spread_cache: dict = {}
+        # Total cache: (ta, tb) -> float (game total, symmetric).
+        # Totals don't change meaningfully by round so we keep a single round-agnostic entry.
+        _total_cache: dict = {}
+
+        feats = build_matchup_features(
+                team_a, team_b, current_year,
+                round_num=round_num,   # ← correct round for each stage
+                seed_a=seed_a, seed_b=seed_b,
+            )
+        if not feats.isna().all():
+                feat_rows.append(feats[MATCHUP_FEATURES].values)
+                valid_pairs.append((team_a, seed_a, team_b, seed_b))
+        else:
+                # No ratings — default 50/50 for this round
+                _wp_cache[(team_a, team_b, round_num)] = 0.5
+                _wp_cache[(team_a, team_b, round_num)] = 0.5
+
+        X = np.array(feat_rows)
+
+            # Mismatch routing (same logic as before — seed_diff doesn't change by round)
+        seed_diffs = abs(seed_a - seed_b)
+        is_mismatch = seed_diffs >= MISMATCH_SEED_DIFF_THRESHOLD
+        if "barthag_diff" in MATCHUP_FEATURES:
+                bidx = list(MATCHUP_FEATURES).index("barthag_diff")
+                is_mismatch = is_mismatch | (np.abs(X[:, bidx]) >= MISMATCH_BARTHAG_THRESHOLD)
+
+        if use_hybrid:
+                spreads = np.zeros(len(X))
+                if is_mismatch.any():
+                    spreads[is_mismatch] = cal_mis.predict(
+                        mis_model.predict(X[is_mismatch])
+                    )
+                if (~is_mismatch).any():
+                    spreads[~is_mismatch] = cal_comp.predict(
+                        comp_model.predict(X[~is_mismatch])
+                    )
+        elif legacy_model is not None:
+                spreads = legacy_model.predict(X)
+        else:
+                spreads = np.zeros(len(X))
+
+
+            # Totals — only compute once (round 1), reuse for display cache
+        if round_num == 1 and has_total_model:
+                raw_totals = total_model.predict(X)
+                totals = np.array(
+                    [apply_tournament_pace_adjustment(float(t)) for t in raw_totals]
+                )
+        else:
+                totals = np.full(len(X), np.nan)
+        for (team_a, seed_a, team_b, seed_b), spread, tot in zip(valid_pairs, spreads, totals):
+            _spread_cache[(team_a, team_b)] = float(spread)
+            _spread_cache[(team_b, team_a)] = -float(spread)
+            _total_cache[(team_a, team_b)] = float(tot)
+            _total_cache[(team_b, team_a)] = float(tot)
+
+
         proj = project_game(
             team_a, team_b, round_num,
             year=proj_year,
@@ -119,7 +214,7 @@ if submitted:
     seed_a = proj["seed_a"] if proj.get("seed_a") is not None else seed_a
     seed_b = proj["seed_b"] if proj.get("seed_b") is not None else seed_b
 
-    model_spread = proj["projected_spread"]   # model convention: positive = team_a wins
+    model_spread = _spread_cache.get((team_a, team_b))   # model convention: positive = team_a wins
     pt  = proj["projected_total"]
     wpa = proj["win_prob_a"]
     wpb = proj["win_prob_b"]
