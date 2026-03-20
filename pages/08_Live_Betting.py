@@ -64,6 +64,27 @@ with st.sidebar:
     pregame_total_input = st.number_input(
         "Pregame projected total", value=140.0, step=1.0
     )
+    st.divider()
+    st.markdown("### 📖 When to Bet")
+    st.markdown("""
+**Most reliable: Halftime**
+The trained XGBoost model only runs within ~3 min of halftime (17–23 min elapsed).
+All other times use a simpler formula — look for the 📡 note in the breakdown.
+
+**Tiers**
+- 🔥 **Strong** (edge ≥7, cov ≥58%) — bet it
+- ✅ **Value** (edge ≥5, cov ≥56%) — worth a unit
+- 📊 **Lean** (edge ≥3, cov ≥54%) — smaller bet or skip
+- ⚪ **Pass** — no bet
+
+**Hard limits (built in)**
+- Under 5 min: Strong/Value auto-demoted to Lean
+- Under 3 min: forced Pass, no bets
+
+**Backtest note**
+Cover rates are an upper bound — historical backtest used pre-game lines as a proxy for live halftime lines. Real halftime lines are sharper.
+""")
+
 
 
 # ── Data loading ───────────────────────────────────────────────────────────────
