@@ -8,7 +8,22 @@ formula_projected_margin() blended spread projection.
 
 from src.model.predict import coverage_probability, kelly_fraction, half_kelly, bet_tier
 from src.model.train import load_model
-from src.features.team_ratings import get_season_averages
+from src.utils.db import query_df as _query_df
+
+
+def get_season_averages(team: str, year: int) -> dict:
+    """Return season-average efficiency stats from torvik_ratings."""
+    try:
+        df = _query_df(
+            "SELECT efg_o, efg_d, to_rate_o, to_rate_d, or_rate_o, or_rate_d "
+            "FROM torvik_ratings WHERE year = ? AND team = ? LIMIT 1",
+            params=[year, team],
+        )
+        if df.empty:
+            return {}
+        return df.iloc[0].to_dict()
+    except Exception:
+        return {}
 
 # ---------------------------------------------------------------------------
 # Model loading (module-level, cached for process lifetime)
