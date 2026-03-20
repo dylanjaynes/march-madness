@@ -149,8 +149,16 @@ def project_game_live(
     #  'adj_d_diff', 'seed_diff', 'round_number']
     # Trained model was built exclusively on halftime snapshots (time_elapsed ≈ 20 min).
     # Using it at other game times extrapolates outside the training distribution and
-    # produces unreliable projections. Restrict to ±3 min of halftime; use formula elsewhere.
-    _near_halftime = (17.0 <= time_elapsed <= 23.0) or game_status == "STATUS_HALFTIME"
+    # produces unreliable projections.
+    # Only fire during STATUS_HALFTIME or in the final 3 min of the 1st half (period=1).
+    # Do NOT fire in the 2nd half by time_elapsed alone — at 17:51 left in period=2,
+    # time_elapsed ≈ 22 min which falls in 17-23 range but total score is already ~86,
+    # far outside the ~62-pt halftime distribution the model was trained on.
+    period = snapshot.get("period", 1)
+    _near_halftime = (
+        game_status == "STATUS_HALFTIME"
+        or (period == 1 and 17.0 <= time_elapsed <= 20.0)
+    )
 
     uses_trained = False
     if _use_trained and _live_model is not None and _near_halftime:
