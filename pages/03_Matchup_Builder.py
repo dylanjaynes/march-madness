@@ -57,7 +57,7 @@ with st.form("matchup_form"):
             key="matchup_team_b",
         )
 
-    col3, col4, col5 = st.columns(3)
+    col3, col4, col5, col6, col7 = st.columns(5)
     with col3:
         round_num = st.selectbox(
             "Tournament Round",
@@ -73,6 +73,16 @@ with st.form("matchup_form"):
         market_total = st.number_input(
             "Market O/U Total (optional)", value=0.0, step=0.5,
             help="The over/under line. Leave 0 to skip.",
+        )
+    with col6:
+        seed_a = st.number.input(
+            "Team A Seed (If NCAAT / Optional)", value=0.0, step=1, max=16
+            help="Leave 0.0 if not tournament"
+        )
+    with col7:
+        seed_b = st.number.input(
+            "Team B Seed (If NCAAT / Optional)", value=0.0, step=1, max=16
+            help="Leave 0.0 if not tournament"
         )
 
     col6, col7 = st.columns(2)
@@ -95,7 +105,7 @@ if submitted:
         proj = project_game(
             team_a, team_b, round_num,
             year=proj_year,
-            seed_a=None, seed_b=None,
+            seed_a=seed_a, seed_b=seed_b,
         )
 
     if "error" in proj:
@@ -120,6 +130,8 @@ if submitted:
     # to model convention (+7 = team_a favored by 7) for all calculations
     mkt_model = -market_spread if market_spread != 0.0 else None
     mkt_t = market_total if market_total != 0.0 else None
+    seed_a = seed_a if seed_a != 0.0 else None
+    seed_b = seed_b if seed_b != 0.0 else None
 
     spread_edge = model_spread - mkt_model if mkt_model is not None else None
     total_edge  = pt - mkt_t if mkt_t is not None else None
