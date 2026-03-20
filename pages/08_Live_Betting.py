@@ -55,14 +55,16 @@ with st.sidebar:
     min_edge = st.slider("Min |edge| (pts)", 0.0, 15.0, 3.0, 0.5)
     hide_pass = st.checkbox("Hide Pass-tier bets", value=True)
     st.divider()
+    st.caption("Pre-game spreads are auto-loaded from the model. Use overrides below only if needed.")
     pregame_spread_input = st.number_input(
-        "Pregame model spread (team1, + = fav)",
+        "Pregame spread override (team1, + = fav)",
         value=0.0,
         step=0.5,
-        help="Pre-game spread for live formula. Negative = team1 is underdog.",
+        help="Leave at 0 to use auto model spread. Only override if you want to force a specific value.",
     )
     pregame_total_input = st.number_input(
-        "Pregame projected total", value=140.0, step=1.0
+        "Pregame total override", value=0.0, step=1.0,
+        help="Leave at 0 to use auto model total.",
     )
     st.divider()
     st.markdown("### 📖 When to Bet")
@@ -94,34 +96,77 @@ def get_live_states() -> list:
     return fetch_live_game_states()
 
 
+@st.cache_data(ttl=300)
+def get_pregame_projections(team_pairs: tuple, year: int) -> dict:
+    """
+    Fetch pre-game model spread and total for each (team1, team2) pair.
+    Cached for 5 minutes — pre-game values don't change once a game starts.
+    Returns {(team1, team2): {"spread": float, "total": float}}.
+    """
+    from src.model.predict import project_game
+    result = {}
+    for team1, team2 in team_pairs:
+        try:
+            proj = project_game(team1, team2, round_num=1, year=year)
+            if "error" not in proj:
+                result[(team1, team2)] = {
+                    "spread": proj.get("projected_spread", 0.0),
+                    "total": proj.get("projected_total", 140.0),
+                }
+        except Exception:
+            pass
+    return result
+
+
 def build_live_predictions(
     states: list,
-    pregame_spread: float,
-    projected_total: float,
+    pregame_spread_override: float,
+    projected_total_override: float,
     year: int,
 ) -> list:
     """
     Run live predictions for all game states.
-    Not cached directly — states already come from a 60s-TTL cached function.
+    Auto-looks up pre-game model spread/total per game.
+    Override inputs (sidebar) are used only when non-zero.
     """
     from src.model.live_predict import project_game_live
+
+    # Fetch pre-game projections for all live games (cached 5 min)
+    team_pairs = tuple((s["team1"], s["team2"]) for s in states)
+    pregame_proj = get_pregame_projections(team_pairs, year)
+
     preds = []
     for snap in states:
+        team1 = snap["team1"]
+        team2 = snap["team2"]
+
+        # Use per-game model spread/total; fall back to sidebar override if lookup failed
+        game_proj = pregame_proj.get((team1, team2), {})
+        pregame_spread = (
+            pregame_spread_override if pregame_spread_override != 0.0
+            else game_proj.get("spread", 0.0)
+        )
+        projected_total = (
+            projected_total_override if projected_total_override != 0.0
+            else game_proj.get("total", 140.0)
+        )
+
         try:
             pred = project_game_live(
-                team1=snap["team1"],
-                team2=snap["team2"],
+                team1=team1,
+                team2=team2,
                 snapshot=snap,
                 pregame_spread=pregame_spread,
                 projected_total=projected_total,
                 year=year,
             )
             pred["_snap"] = snap
+            pred["_pregame_spread"] = pregame_spread
             preds.append(pred)
         except Exception as e:
             preds.append({
-                "team1": snap.get("team1", "?"),
-                "team2": snap.get("team2", "?"),
+                "team1": team1,
+                "team2": team2,
                 "error": str(e),
                 "_snap": snap,
                 "game_status": snap.get("game_status", ""),
@@ -292,8 +337,9 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
     mkt_display = _format_spread(live_mkt, team1) if live_mkt is not None else "No line"
     edge_line   = f"{edge:+.1f} pts" if edge is not None else "—"
 
+    pregame_spread_used = pred.get("_pregame_spread", pg_sp)
     breakdown_text = (
-        f"Pre-game model:    {team1} {pg_sp:+.1f}\n"
+        f"Pre-game model:    {team1} {pregame_spread_used:+.1f}  (auto)\n"
         f"Time-weight adj:   {tw_adj:+.1f}\n"
         f"eFG% adj:          {eg_adj:+.1f}\n"
         f"Rebound adj:       {ob_adj:+.1f}\n"
@@ -339,8 +385,8 @@ if not raw_states:
 with st.spinner("Running live model..."):
     all_preds = build_live_predictions(
         states=raw_states,
-        pregame_spread=pregame_spread_input,
-        projected_total=pregame_total_input,
+        pregame_spread_override=pregame_spread_input,
+        projected_total_override=pregame_total_input,
         year=current_year,
     )
 
