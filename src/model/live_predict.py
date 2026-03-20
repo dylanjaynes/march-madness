@@ -222,10 +222,16 @@ def project_game_live(
     orb_adj_val = orb_margin * 0.25 * w_model
     to_adj_val  = to_margin  * 0.40 * w_model
 
-    # Edge vs live market spread
+    # Edge vs live market spread.
+    # live_spread is in betting convention (negative = home/team1 favored).
+    # projected_margin is in model convention (positive = team1 wins).
+    # To compare apples-to-apples: model edge = projected_margin - (-live_spread)
+    #   = projected_margin + live_spread
+    # Example: projected_margin=+28, live_spread=-37.5 → edge = 28 + (-37.5) = -9.5
+    #   (model less bullish than market → no bet on team1 spread)
     edge = None
     if live_spread is not None:
-        edge = projected_margin - live_spread
+        edge = projected_margin + live_spread
 
     # --- Tier and sizing ---
     # CRITICAL: suppress Strong/Value signals when time_remaining < 5 minutes;
