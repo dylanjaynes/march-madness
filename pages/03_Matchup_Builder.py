@@ -129,6 +129,11 @@ if submitted:
     # because seed_diff is a model feature and arbitrary seeds distort predictions.
     with st.spinner("Running projection..."):
 
+        proj = project_game(
+            team_a, team_b, round_num,
+            year=proj_year,
+            seed_a=seed_a, seed_b=seed_b,
+        )
 # ── Build feature matrix for this round ───────────────────────────────
         feat_rows   = []
         valid_pairs = []
@@ -147,7 +152,7 @@ if submitted:
         feats = build_matchup_features(
                 team_a, team_b, current_year,
                 round_num=round_num,   # ← correct round for each stage
-                seed_a=seed_a, seed_b=seed_b,
+                seed_a=proj["seed_a"], seed_b=proj["seed_b"],
             )
         if not feats.isna().all():
                 feat_rows.append(feats[MATCHUP_FEATURES].values)
