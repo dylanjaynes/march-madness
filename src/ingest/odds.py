@@ -298,19 +298,30 @@ def fetch_and_store_scores(year: int, days_from: int = 3) -> dict:
 
 def fetch_and_store_scores(year: int, days_from: int = 3) -> dict:
     """
-    Fetch completed tournament scores + closing lines from The Odds API
-    and upsert into historical_results and historical_lines.
+    Fetch completed tournament results + closing lines for `year`.
 
-    Delegates to fetch_live_scores.ingest_live_scores which handles
-    both the /scores and /odds endpoints cleanly.
+    Step 1: Sweep all tournament dates via ESPN scoreboard → historical_results.
+            This is free, comprehensive, and works for any past date.
+    Step 2: Fetch any recent scores Odds API /scores has (adds redundancy).
+    Step 3: Pull closing lines from Odds API /historical endpoint for every
+            game date now in historical_results → historical_lines.
+            Lines are stored once and never need to be fetched again.
 
     Returns dict: {"results": int, "lines": int}
     """
-    from src.ingest.fetch_live_scores import ingest_live_scores
-    summary = ingest_live_scores(year=year, days_from=days_from)
+    from src.ingest.fetch_live_scores import ingest_espn_results, ingest_live_scores
     from src.ingest.odds_historical import ingest_historical_odds_for_year
-    ingest_historical_odds_for_year(year)
+
+    # Step 1: ESPN sweep — authoritative, covers full tournament date range
+    espn_inserted = ingest_espn_results(year)
+
+    # Step 2: Odds API /scores for recent games (supplements ESPN, adds lines if paid tier)
+    summary = ingest_live_scores(year=year, days_from=days_from)
+
+    # Step 3: Historical closing lines for all dates now in historical_results
+    lines_stored = ingest_historical_odds_for_year(year)
+
     return {
-        "results": summary.get("results_inserted", 0),
-        "lines":   summary.get("lines_inserted", 0),
+        "results": espn_inserted + summary.get("results_inserted", 0),
+        "lines":   lines_stored,
     }

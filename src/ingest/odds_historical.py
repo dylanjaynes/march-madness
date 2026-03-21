@@ -159,6 +159,22 @@ def ingest_historical_odds_for_year(year: int) -> int:
                 if line:
                     print(f"      fuzzy: {t1_raw} vs {t2_raw}")
 
+            # Fallback: evening ET games have UTC date = next day, so the
+            # pre-game odds live in the previous date's 14:00Z snapshot
+            if line is None:
+                from datetime import date, timedelta
+                prev_date = (date.fromisoformat(game_date) - timedelta(days=1)).isoformat()
+                prev_str = f"{prev_date}T14:00:00Z"
+                prev_games = fetch_odds_snapshot(prev_str)
+                if prev_games:
+                    prev_map = _build_lines_map(prev_games)
+                    line = prev_map.get(frozenset({t1, t2}))
+                    if line is None:
+                        line = _fuzzy_match(t1, t2, prev_map)
+                    if line:
+                        print(f"      found via prev-day snapshot ({prev_date}): {t1_raw} vs {t2_raw}")
+                time.sleep(0.3)
+
             if line is None:
                 print(f"      NO MATCH: {t1_raw} vs {t2_raw}")
                 continue

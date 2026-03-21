@@ -383,13 +383,16 @@ with st.sidebar:
 
     # Fetch/refresh results for selected year
     if st.button(f"📥 Fetch {selected_year} results", use_container_width=True,
-                 help="Grab the latest tournament scores"):
-        with st.spinner(f"Fetching {selected_year} results from The-Odds-API"):
+                 help="Sweep all tournament dates (ESPN) + fetch closing lines from historical endpoint"):
+        with st.spinner(f"Fetching {selected_year} results & closing lines…"):
             from src.ingest.odds import fetch_and_store_scores
             try:
-                n = fetch_and_store_scores(selected_year)
+                counts = fetch_and_store_scores(selected_year)
                 st.cache_data.clear()
-                st.success(f"Fetched {n} games for {selected_year}")
+                st.success(
+                    f"Stored {counts.get('results', 0)} results · "
+                    f"{counts.get('lines', 0)} closing lines"
+                )
                 st.rerun()
             except Exception as e:
                 st.error(f"Fetch failed: {e}")
@@ -420,7 +423,18 @@ st.caption(
 )
 
 n_in_db = years_with_results.get(selected_year, 0)
-if n_in_db == 0:
+if n_in_db == 0 and selected_year == current_year:
+    # Auto-fetch on first visit for current year — no manual click required
+    with st.spinner(f"Auto-fetching {current_year} results…"):
+        try:
+            from src.ingest.odds import fetch_and_store_scores
+            fetch_and_store_scores(current_year)
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as e:
+            st.warning(f"Auto-fetch failed: {e}. Use the **📥 Fetch results** button.")
+            st.stop()
+elif n_in_db == 0:
     st.info(
         f"No completed results for {selected_year} in the database yet. "
         "Click **📥 Fetch results** in the sidebar after games are played."
@@ -450,17 +464,16 @@ if df.empty:
     st.warning(f"No gradeable data found for {selected_year}.")
     st.stop()
 
+# ── Separate NCAAT (First Four, round=0) from main tournament ─────────────────
+ncaat_df = df[df["round_num"] == 0]
+main_df  = df[df["round_num"] >  0]
+
 # Apply filters (main tournament only — First Four shown separately below)
 view = main_df.copy()
 if not show_no_line:
     view = view[view["has_line"]]
 if min_edge > 0:
     view = view[view["spread_edge"].notna() & (view["spread_edge"].abs() >= min_edge)]
-
-
-# ── Separate NCAAT (First Four, round=0) from main tournament ─────────────────
-ncaat_df = df[df["round_num"] == 0]
-main_df  = df[df["round_num"] >  0]
 
 # ── Summary KPIs (main tournament only) ───────────────────────────────────────
 graded   = main_df[main_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]

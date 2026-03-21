@@ -189,6 +189,15 @@ def ingest_live_scores(year: int = None, days_from: int = 3) -> dict:
     completed = fetch_completed_scores(days_from=days_from)
     odds_map  = fetch_current_odds()
 
+    # Build tournament team set to filter out NIT and other tournaments
+    bracket_df = query_df(
+        "SELECT team FROM tournament_bracket WHERE year = ?", params=[year]
+    )
+    tournament_teams = set()
+    if not bracket_df.empty:
+        for _, br in bracket_df.iterrows():
+            tournament_teams.add(_norm(str(br["team"])).lower())
+
     results_inserted = 0
     lines_inserted   = 0
     skipped          = 0
@@ -199,6 +208,13 @@ def ingest_live_scores(year: int = None, days_from: int = 3) -> dict:
         home = _norm(home_raw)
         away = _norm(away_raw)
         game_date = _parse_date(game.get("commence_time", ""))
+
+        # Skip non-NCAAT games (NIT, CBI, etc.) when bracket data is available
+        if tournament_teams and (
+            home.lower() not in tournament_teams
+            and away.lower() not in tournament_teams
+        ):
+            continue
 
         # Parse scores
         scores = game.get("scores", []) or []
@@ -322,3 +338,151 @@ def ingest_live_scores(year: int = None, days_from: int = 3) -> dict:
     }
     print(f"\n  Summary: {results_inserted} results, {lines_inserted} lines, {skipped} skipped")
     return summary
+
+
+ESPN_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/"
+    "basketball/mens-college-basketball/scoreboard"
+)
+ESPN_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+
+def ingest_espn_results(year: int) -> int:
+    """
+    Fetch all completed NCAA Tournament results for `year` from ESPN scoreboard.
+    Sweeps every date from First Four through Championship (Selection Sunday +3
+    to +25 days) and stores completed games in historical_results.
+
+    Returns number of new rows inserted.
+    """
+    import time
+    from datetime import date, timedelta
+    from src.utils.config import SELECTION_SUNDAY
+
+    sel_str = SELECTION_SUNDAY.get(year)
+    if not sel_str:
+        print(f"  [espn] No SELECTION_SUNDAY config for {year}")
+        return 0
+
+    # Parse selection sunday: '0315' → date(year, 3, 15)
+    month = int(sel_str[:2])
+    day   = int(sel_str[2:])
+    sel_date = date(year, month, day)
+
+    # Tournament bracket: use to filter ESPN games to only NCAAT teams
+    bracket_df = query_df(
+        "SELECT team, seed FROM tournament_bracket WHERE year = ?",
+        params=[year],
+    )
+    tournament_teams = set()
+    seed_map = {}
+    if not bracket_df.empty:
+        for _, br in bracket_df.iterrows():
+            norm = _norm(str(br["team"])).lower()
+            tournament_teams.add(norm)
+            seed_map[norm] = int(br["seed"])
+
+    # First Four starts Thursday after Selection Sunday (~3 days later)
+    # Championship is ~25 days after Selection Sunday
+    start_date = sel_date + timedelta(days=3)
+    end_date   = sel_date + timedelta(days=25)
+
+    inserted = 0
+    current = start_date
+    while current <= end_date:
+        date_str = current.strftime("%Y%m%d")
+        try:
+            resp = requests.get(
+                ESPN_SCOREBOARD_URL,
+                params={"dates": date_str},
+                headers=ESPN_HEADERS,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"  [espn] {date_str} fetch error: {e}")
+            current += timedelta(days=1)
+            time.sleep(0.3)
+            continue
+
+        events = data.get("events", [])
+        for event in events:
+            try:
+                status_name = (
+                    event.get("status", {}).get("type", {}).get("name", "")
+                )
+                if status_name != "STATUS_FINAL":
+                    continue
+
+                competitions = event.get("competitions", [])
+                if not competitions:
+                    continue
+                comp = competitions[0]
+                competitors = comp.get("competitors", [])
+                if len(competitors) < 2:
+                    continue
+
+                home_comp = next(
+                    (c for c in competitors if c.get("homeAway") == "home"),
+                    competitors[0],
+                )
+                away_comp = next(
+                    (c for c in competitors if c.get("homeAway") == "away"),
+                    competitors[1],
+                )
+
+                home_raw = home_comp.get("team", {}).get("displayName", "")
+                away_raw = away_comp.get("team", {}).get("displayName", "")
+                home = _norm(home_raw)
+                away = _norm(away_raw)
+
+                # Only store NCAAT games
+                if tournament_teams and (
+                    home.lower() not in tournament_teams
+                    and away.lower() not in tournament_teams
+                ):
+                    continue
+
+                try:
+                    score_home = int(home_comp.get("score", 0))
+                    score_away = int(away_comp.get("score", 0))
+                except Exception:
+                    continue
+
+                if score_home == 0 and score_away == 0:
+                    continue
+
+                winner = home if score_home > score_away else away
+                margin = abs(score_home - score_away)
+                total_pts = score_home + score_away
+
+                seed_home = seed_map.get(home.lower())
+                seed_away = seed_map.get(away.lower())
+                round_num  = _infer_round(seed_home, seed_away)
+                round_name = ROUND_NAMES.get(round_num, "R64")
+                game_date  = current.isoformat()
+                espn_id    = event.get("id", "")
+
+                with db_conn() as conn:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO historical_results
+                           (year, round_number, round_name, game_date,
+                            team1, team2, score1, score2,
+                            winner, margin, total_points, seed1, seed2, espn_game_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        [year, round_num, round_name, game_date,
+                         home, away, score_home, score_away,
+                         winner, margin, total_pts, seed_home, seed_away, espn_id],
+                    )
+                inserted += 1
+                print(f"  [espn] ✓ {home} {score_home}–{score_away} {away} ({game_date})")
+
+            except Exception as e:
+                print(f"  [espn] parse error on {date_str}: {e}")
+
+        time.sleep(0.3)
+        current += timedelta(days=1)
+
+    print(f"  [espn] Inserted {inserted} results for {year}")
+    return inserted

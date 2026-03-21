@@ -47,6 +47,14 @@ def initialize_app():
                     run_full_training_pipeline()
             except Exception as e:
                 st.error(f"Initialization error: {e}")
+
+    # Start background scheduler (odds refresh, ratings, results sync)
+    try:
+        from src.ingest.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        print(f"  [app] Scheduler start error: {e}")
+
     return True
 
 
