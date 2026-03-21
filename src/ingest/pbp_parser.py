@@ -89,8 +89,9 @@ def parse_plays(plays: list, home_team_id: str) -> List[Dict]:
             is_fg_made    = False
             is_3pt        = False
 
-            # ESPN uses "Free Throw" in type.text reliably; text wording varies
-            is_ft = "Free Throw" in type_text or "Free Throw" in text
+            # ESPN type.text for free throws is "MadeFreeThrow" (camelCase, no space).
+            # shooting flag is None/False on FT plays. Use type_text as primary signal.
+            is_ft = "FreeThrow" in type_text or "free throw" in text.lower()
 
             if scoring and score_val == 2 and not is_ft:
                 event_type    = "MADE_2"
@@ -103,15 +104,16 @@ def parse_plays(plays: list, home_team_id: str) -> List[Dict]:
                 is_fg_made    = True
                 is_3pt        = True
 
-            elif scoring and is_ft:
+            elif is_ft and scoring:
                 event_type = "MADE_FT"
+
+            elif is_ft and not scoring:
+                # Missed FT: ESPN type.text is still "MadeFreeThrow" but scoringPlay=False
+                event_type = "MISSED_FT"
 
             elif shooting and not scoring and not is_ft:
                 event_type    = "MISSED_FG"
                 is_fg_attempt = True
-
-            elif is_ft and not scoring:
-                event_type = "MISSED_FT"
 
             elif "Turnover" in type_text or "turnover" in text.lower():
                 event_type = "TURNOVER"
