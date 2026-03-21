@@ -70,8 +70,11 @@ with st.sidebar:
     st.markdown("### 📖 When to Bet")
     st.markdown("""
 **Most reliable: Halftime**
-The trained XGBoost model only runs within ~3 min of halftime (17–23 min elapsed).
-All other times use a simpler formula — look for the 📡 note in the breakdown.
+The retrained XGBoost model covers all game states (trained at 19 timepoints per game).
+Momentum, pace, and shooting splits from live PBP enrich every projection.
+
+**Run alerts**
+⚡ Shown above card when a team has a 9+ point unanswered run.
 
 **Tiers**
 - 🔥 **Strong** (edge ≥7, cov ≥58%) — bet it
@@ -92,8 +95,8 @@ Cover rates are an upper bound — historical backtest used pre-game lines as a 
 # ── Data loading ───────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def get_live_states() -> list:
-    from src.ingest.live_game_state import fetch_live_game_states
-    return fetch_live_game_states()
+    from src.ingest.live_game_state import fetch_live_game_states_with_pbp
+    return fetch_live_game_states_with_pbp()
 
 
 @st.cache_data(ttl=300)
@@ -210,6 +213,17 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
         st.warning(f"{pred.get('team1','?')} vs {pred.get('team2','?')}: {pred['error']}")
         return
 
+    # Run alert — show above card when unanswered run >= 9
+    pbp_data = pred.get("pbp", {})
+    run_home = pbp_data.get("run_home", 0) or 0
+    run_away = pbp_data.get("run_away", 0) or 0
+    _team1 = pred.get("team1", "")
+    _team2 = pred.get("team2", "")
+    if run_home >= 9:
+        st.warning(f"⚡ {_team1} on a {run_home}-0 run")
+    elif run_away >= 9:
+        st.warning(f"⚡ {_team2} on a {run_away}-0 run")
+
     snap           = pred.get("_snap", {})
     team1          = pred["team1"]
     team2          = pred["team2"]
@@ -280,6 +294,19 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
             f"</div>"
         )
 
+    # PBP momentum/pace
+    mom5       = pbp_data.get("momentum_5pos", 0.0) or 0.0
+    pace_live  = pbp_data.get("pace_live")
+
+    momentum_html = ""
+    if pbp_data.get("available") and mom5 != 0.0:
+        mom_team = team1 if mom5 > 0 else team2
+        momentum_html = (
+            f"<div style='font-size:0.75rem;color:#f39c12;margin-top:4px'>"
+            f"Last 5 poss: {mom_team} +{abs(mom5):.0f} pts"
+            f"</div>"
+        )
+
     stats_html = (
         f"<div style='margin-top:10px'>"
         f"<div style='display:flex;justify-content:space-between;padding:2px 0;font-size:0.75rem'>"
@@ -292,7 +319,13 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
         + _stat_row("Off Reb", orb1, orb2, orb_color)
         + _stat_row("Turnovers", to1, to2, to_color)
         + f"</div>"
+        + momentum_html
     )
+
+    pace_html = ""
+    if pace_live and proj_margin is not None:
+        proj_total = abs(proj_margin) + (score1 + score2)  # rough projection
+        pace_html = f"<div style='font-size:0.75rem;color:#aaa;margin-top:4px'>Pace: {pace_live:.0f} proj pts/game</div>"
 
     card_html = f"""
 <div style='background:{bg};border-left:4px solid {accent};border-radius:8px;padding:16px;margin-bottom:12px'>
@@ -323,6 +356,7 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
     </div>
   </div>
   {stats_html}
+  {pace_html}
 </div>
 """
     st.markdown(card_html, unsafe_allow_html=True)
@@ -334,6 +368,7 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
     eg_adj  = breakdown.get("efg_adj", 0.0)
     ob_adj  = breakdown.get("orb_adj", 0.0)
     ta_adj  = breakdown.get("to_adj", 0.0)
+    mom_adj = breakdown.get("momentum_adj", 0.0)
     mkt_display = _format_spread(live_mkt, team1) if live_mkt is not None else "No line"
     edge_line   = f"{edge:+.1f} pts" if edge is not None else "—"
 
@@ -344,6 +379,7 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
         f"eFG% adj:          {eg_adj:+.1f}\n"
         f"Rebound adj:       {ob_adj:+.1f}\n"
         f"TO adj:            {ta_adj:+.1f}\n"
+        f"Momentum (5 poss): {mom_adj:+.1f}\n"
         f"────────────────\n"
         f"Live model:        {team1} {proj_margin:+.1f}\n"
         f"Market:            {mkt_display}\n"
@@ -353,7 +389,7 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
     with st.expander("📊 Spread Breakdown"):
         st.code(breakdown_text, language=None)
         if not uses_trained:
-            st.caption("📡 Using formula model — train live model for improved accuracy")
+            st.caption("📡 Using formula + PBP momentum — retrained model pending backfill")
 
     st.divider()
 

@@ -42,6 +42,16 @@ except FileNotFoundError:
 # Core formula
 # ---------------------------------------------------------------------------
 
+def _momentum_adjustment(mom5: float, mom10: float, time_remaining: float) -> float:
+    """
+    Blend last-5 and last-10 possession momentum into a projected margin adjustment.
+    Capped at ±3 points, scaled by time remaining.
+    """
+    blended = mom5 * 0.6 + mom10 * 0.4
+    w = time_remaining / 40.0
+    return max(-3.0, min(3.0, blended * 0.3 * w))
+
+
 def formula_projected_margin(
     current_margin: float,
     pregame_spread: float,
@@ -141,31 +151,32 @@ def project_game_live(
     orb_margin = float((orb1 or 0) - (orb2 or 0))
     to_margin  = float((to1  or 0) - (to2  or 0))
 
+    # PBP features (from fetch_live_game_states_with_pbp enrichment)
+    pbp_available   = snapshot.get("pbp_available", False)
+    pace_live       = snapshot.get("pace_live", 0.0) or 0.0
+    momentum_5pos   = snapshot.get("momentum_5pos", 0.0) or 0.0
+    momentum_10pos  = snapshot.get("momentum_10pos", 0.0) or 0.0
+    possessions     = snapshot.get("possessions_home", 0) + snapshot.get("possessions_away", 0)
+
+    # Use PBP-computed stats if available (more accurate than ESPN box score)
+    if pbp_available and snapshot.get("efg_diff") is not None:
+        efg_diff   = float(snapshot["efg_diff"]) * 100.0  # convert decimal to pct-points
+    if pbp_available:
+        if snapshot.get("orb_margin") is not None:
+            orb_margin = float(snapshot["orb_margin"])
+        if snapshot.get("to_margin") is not None:
+            to_margin = float(snapshot["to_margin"])
+
     # --- Projection ---
-    # Build the full 15-feature vector matching LIVE_FEATURES order:
-    # ['pregame_spread', 'h1_margin', 'h1_combined', 'time_elapsed_pct',
-    #  'time_remaining_pct', 'efg_pct_diff', 'orb_margin', 'to_margin',
-    #  'pace_surprise', 'margin_surprise', 'barthag_diff', 'adj_o_diff',
-    #  'adj_d_diff', 'seed_diff', 'round_number']
-    # Trained model was built exclusively on halftime snapshots (time_elapsed ≈ 20 min).
-    # Using it at other game times extrapolates outside the training distribution and
-    # produces unreliable projections.
-    # Only fire during STATUS_HALFTIME or in the final 3 min of the 1st half (period=1).
-    # Do NOT fire in the 2nd half by time_elapsed alone — at 17:51 left in period=2,
-    # time_elapsed ≈ 22 min which falls in 17-23 range but total score is already ~86,
-    # far outside the ~62-pt halftime distribution the model was trained on.
-    period = snapshot.get("period", 1)
-    _near_halftime = (
-        game_status == "STATUS_HALFTIME"
-        or (period == 1 and 17.0 <= time_elapsed <= 20.0)
-    )
+    # The retrained model covers all game states (trained on 19 timepoints per game).
+    # Use it throughout the game when PBP data is available.
+    # When no PBP, use the formula (as before).
+    import numpy as np
+    from src.utils.db import query_df as _qdf
 
     uses_trained = False
-    if _use_trained and _live_model is not None and _near_halftime:
+    if _use_trained and _live_model is not None:
         try:
-            import numpy as np
-            from src.utils.db import query_df as _qdf
-
             # Torvik ratings for barthag/adj_o/adj_d differentials
             _ratings = _qdf(
                 "SELECT team, barthag, adj_o, adj_d FROM torvik_ratings WHERE year=? AND team IN (?,?)",
@@ -186,26 +197,31 @@ def project_game_live(
             _s2 = int(_seeds[_seeds["team"] == team2]["seed"].iloc[0]) if not _seeds[_seeds["team"] == team2].empty else 8
             seed_diff = _s1 - _s2
 
-            h1_combined   = (score1 or 0) + (score2 or 0)
+            h1_combined    = (score1 or 0) + (score2 or 0)
             pace_surprise  = h1_combined - (projected_total / 2.0)
             margin_surprise = current_margin - (pregame_spread * (time_elapsed / 40.0))
 
+            # Full 19-feature vector matching LIVE_FEATURES order
             feat_vec = [
-                pregame_spread,                        # pregame_spread
-                current_margin,                        # h1_margin (current score diff)
-                h1_combined,                           # h1_combined
-                time_elapsed / 40.0,                   # time_elapsed_pct
-                time_remaining / 40.0,                 # time_remaining_pct
-                efg_diff if efg_diff != 0.0 else float("nan"),  # efg_pct_diff
-                orb_margin if orb_margin != 0.0 else float("nan"),  # orb_margin
-                to_margin  if to_margin  != 0.0 else float("nan"),  # to_margin
-                pace_surprise,                         # pace_surprise
-                margin_surprise,                       # margin_surprise
-                barthag_diff,                          # barthag_diff
-                adj_o_diff,                            # adj_o_diff
-                adj_d_diff,                            # adj_d_diff
-                seed_diff,                             # seed_diff
-                snapshot.get("round_number", 1),       # round_number
+                pregame_spread,                                          # pregame_spread
+                current_margin,                                          # h1_margin
+                float(h1_combined),                                      # h1_combined
+                time_elapsed / 40.0,                                     # time_elapsed_pct
+                time_remaining / 40.0,                                   # time_remaining_pct
+                efg_diff if efg_diff != 0.0 else float("nan"),           # efg_pct_diff
+                orb_margin if orb_margin != 0.0 else float("nan"),       # orb_margin
+                to_margin  if to_margin  != 0.0 else float("nan"),       # to_margin
+                pace_surprise,                                           # pace_surprise
+                margin_surprise,                                         # margin_surprise
+                barthag_diff,                                            # barthag_diff
+                adj_o_diff,                                              # adj_o_diff
+                adj_d_diff,                                              # adj_d_diff
+                float(seed_diff),                                        # seed_diff
+                float(snapshot.get("round_number", 1) or 1),            # round_number
+                float(pace_live) if pace_live else float("nan"),         # pace_live
+                float(momentum_5pos),                                    # momentum_5pos
+                float(momentum_10pos),                                   # momentum_10pos
+                float(possessions) if possessions > 0 else float("nan"),  # possessions
             ]
             features = np.array([feat_vec])
             raw = float(_live_model.predict(features)[0])
@@ -222,6 +238,17 @@ def project_game_live(
             efg_diff, orb_margin, to_margin,
         )
 
+    # PBP momentum layer on top of formula (only when formula is used + PBP available)
+    pbp_adj = 0.0
+    if not uses_trained and pbp_available:
+        w_model = time_remaining / 40.0
+        efg_adj_pbp = (efg_diff  * 0.15 * w_model) if efg_diff else 0.0
+        orb_adj_pbp = (orb_margin * 0.25 * w_model) if orb_margin else 0.0
+        to_adj_pbp  = (to_margin  * 0.40 * w_model) if to_margin else 0.0
+        mom_adj     = _momentum_adjustment(momentum_5pos, momentum_10pos, time_remaining)
+        pbp_adj     = mom_adj  # eFG/ORB/TO already in formula; add momentum on top
+        projected_margin += pbp_adj
+
     # Breakdown components (for display)
     w_score  = time_elapsed   / 40.0
     w_model  = time_remaining / 40.0
@@ -229,6 +256,7 @@ def project_game_live(
     efg_adj_val = efg_diff  * 0.15 * w_model
     orb_adj_val = orb_margin * 0.25 * w_model
     to_adj_val  = to_margin  * 0.40 * w_model
+    mom_adj_val = _momentum_adjustment(momentum_5pos, momentum_10pos, time_remaining)
 
     # Edge vs live market spread.
     # live_spread is in betting convention (negative = home/team1 favored).
@@ -293,16 +321,26 @@ def project_game_live(
             "efg_adj":          round(efg_adj_val, 2),
             "orb_adj":          round(orb_adj_val, 2),
             "to_adj":           round(to_adj_val, 2),
+            "momentum_adj":     round(mom_adj_val, 2),
         },
         "stats": {
-            "efg_pct1":   efg_pct1,
-            "efg_pct2":   efg_pct2,
+            "efg_pct1":    efg_pct1,
+            "efg_pct2":    efg_pct2,
             "efg_season1": efg_season1,
             "efg_season2": efg_season2,
-            "orb1":       orb1,
-            "orb2":       orb2,
-            "to1":        to1,
-            "to2":        to2,
+            "orb1":        orb1,
+            "orb2":        orb2,
+            "to1":         to1,
+            "to2":         to2,
+        },
+        "pbp": {
+            "available":     pbp_available,
+            "momentum_5pos": round(momentum_5pos, 1),
+            "momentum_10pos": round(momentum_10pos, 1),
+            "pace_live":     round(pace_live, 1) if pace_live else None,
+            "run_home":      snapshot.get("run_home", 0),
+            "run_away":      snapshot.get("run_away", 0),
+            "possessions":   possessions,
         },
         "uses_trained_model": uses_trained,
     }

@@ -224,6 +224,28 @@ CREATE TABLE IF NOT EXISTS live_game_snapshots (
     projected_total REAL
 );
 
+CREATE TABLE IF NOT EXISTS pbp_plays (
+    play_id         TEXT,
+    espn_game_id    TEXT,
+    game_date       TEXT,
+    team1           TEXT,
+    team2           TEXT,
+    period          INTEGER,
+    clock_secs      INTEGER,
+    time_elapsed    REAL,
+    event_type      TEXT,
+    team            TEXT,
+    score_value     INTEGER,
+    home_score      INTEGER,
+    away_score      INTEGER,
+    margin          INTEGER,
+    is_fg_attempt   BOOLEAN,
+    is_fg_made      BOOLEAN,
+    is_3pt          BOOLEAN,
+    raw_text        TEXT,
+    PRIMARY KEY (espn_game_id, play_id)
+);
+
 CREATE TABLE IF NOT EXISTS live_predictions (
     prediction_id     TEXT PRIMARY KEY,
     snapshot_id       TEXT,

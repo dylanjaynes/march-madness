@@ -336,6 +336,74 @@ def store_snapshot(game_state: dict) -> str:
     return snapshot_id
 
 
+def fetch_live_game_states_with_pbp() -> List[Dict]:
+    """
+    Wraps fetch_live_game_states() and enriches each state with live PBP data.
+    Sets state['pbp_available'] = True/False on each game.
+    The existing fetch_live_game_states() is untouched.
+    """
+    from src.ingest.pbp_parser import parse_plays, compute_game_state_at
+
+    states = fetch_live_game_states()
+
+    for state in states:
+        try:
+            game_id = state.get("game_id")
+            if not game_id:
+                state["pbp_available"] = False
+                continue
+
+            resp = requests.get(
+                ESPN_SUMMARY,
+                params={"event": game_id},
+                headers=HEADERS,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Silent skip for invalid ESPN IDs
+            if "code" in data and "header" not in data:
+                state["pbp_available"] = False
+                continue
+
+            plays_raw = data.get("plays", [])
+            if not plays_raw:
+                state["pbp_available"] = False
+                continue
+
+            # Get home team ID
+            try:
+                competitions = data.get("header", {}).get("competitions", data.get("competitions", []))
+                competitors  = competitions[0].get("competitors", [])
+                home_comp    = next(
+                    (c for c in competitors if c.get("homeAway") == "home"),
+                    competitors[0],
+                )
+                home_id = home_comp.get("team", {}).get("id", "")
+            except Exception:
+                home_id = ""
+
+            plays_parsed = parse_plays(plays_raw, home_id)
+            time_elapsed = state.get("time_elapsed", 20.0)
+
+            pbp_state = compute_game_state_at(
+                plays_parsed,
+                at_time_elapsed=time_elapsed,
+                home_team=state.get("team1", ""),
+                away_team=state.get("team2", ""),
+            )
+
+            state.update(pbp_state)
+            state["pbp_available"] = True
+
+        except Exception as e:
+            state["pbp_available"] = False
+            print(f"  [pbp] {state.get('team1', '?')} warning: {e}")
+
+    return states
+
+
 def poll_live_games(pregame_spread_lookup: Optional[Dict] = None) -> List[Dict]:
     """
     Main polling function. Fetches states, stores snapshots, returns states.

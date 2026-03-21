@@ -1,20 +1,26 @@
 """
 live_train_data.py
 ------------------
-Assembles training data for the live in-game spread model by joining:
-  halftime_scores + historical_results + historical_lines + torvik_ratings
+Assembles training data for the live in-game spread model.
+
+New architecture (PBP upgrade):
+  - For games with play-by-play data: generates 19 training rows per game
+    at 2-minute intervals from minute 2 through minute 38.
+  - For games without PBP (e.g. 2019): falls back to single halftime row
+    from halftime_scores table.
 
 Target: actual_final_margin = score1 - score2 (team1 perspective, better seed = team1)
 
-All optional box-score columns (efg, orb, to) are left as NaN when absent
-from the halftime_scores table — they are NOT imputed here.
+All optional box-score columns are left as NaN when absent — XGBoost handles
+missing values natively.
 """
 
 from __future__ import annotations
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
+from src.ingest.pbp_parser import compute_game_state_at
 from src.utils.config import TOURNAMENT_YEARS
 from src.utils.db import query_df
 
@@ -23,8 +29,8 @@ from src.utils.db import query_df
 # ---------------------------------------------------------------------------
 LIVE_FEATURES: list[str] = [
     "pregame_spread",
-    "h1_margin",
-    "h1_combined",
+    "h1_margin",         # current margin at snapshot time (team1 perspective)
+    "h1_combined",       # current combined score at snapshot time
     "time_elapsed_pct",
     "time_remaining_pct",
     "efg_pct_diff",
@@ -37,8 +43,215 @@ LIVE_FEATURES: list[str] = [
     "adj_d_diff",
     "seed_diff",
     "round_number",
+    "pace_live",
+    "momentum_5pos",
+    "momentum_10pos",
+    "possessions",
 ]
 
+# Training timepoints: 2-minute intervals from minute 2 through minute 38
+# (19 timepoints × ~665 games = ~12,600 training rows when PBP available)
+TRAINING_TIMEPOINTS: list[float] = [
+    2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0,
+    20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 34.0, 36.0, 38.0,
+]
+
+
+# ---------------------------------------------------------------------------
+# PBP feature helpers
+# ---------------------------------------------------------------------------
+
+def build_pbp_features_at_halftime(
+    espn_game_id: str,
+    home_team: str,
+    away_team: str,
+) -> dict | None:
+    """
+    Returns game state at halftime (t=20.0) computed from pbp_plays.
+    Returns None if no PBP data exists for this game.
+    """
+    plays = query_df(
+        "SELECT * FROM pbp_plays WHERE espn_game_id = ? ORDER BY time_elapsed ASC",
+        params=[espn_game_id],
+    )
+    if plays.empty:
+        return None
+
+    plays_list = plays.to_dict("records")
+    return compute_game_state_at(
+        plays_list,
+        at_time_elapsed=20.0,
+        home_team=home_team,
+        away_team=away_team,
+    )
+
+
+def _build_pbp_rows_for_game(
+    espn_game_id: str,
+    game_meta: dict,
+    team1_is_home: bool,
+    actual_final_margin: float,
+) -> list[dict]:
+    """
+    Build one training row per TRAINING_TIMEPOINT for a game with PBP data.
+
+    team1_is_home: True if the team1 in game_meta is the ESPN home team.
+    actual_final_margin: final margin from team1 perspective (positive = team1 won).
+    """
+    plays = query_df(
+        "SELECT * FROM pbp_plays WHERE espn_game_id = ? ORDER BY time_elapsed ASC",
+        params=[espn_game_id],
+    )
+    if plays.empty:
+        return []
+
+    plays_list = plays.to_dict("records")
+    rows = []
+
+    for t in TRAINING_TIMEPOINTS:
+        try:
+            # Pass dummy team names — we orient manually below
+            state = compute_game_state_at(
+                plays_list,
+                at_time_elapsed=t,
+                home_team="home",
+                away_team="away",
+            )
+
+            # Orient from home perspective → team1 perspective
+            sign = 1.0 if team1_is_home else -1.0
+
+            current_margin = sign * state["current_margin"]
+            h1_combined    = state["score_home"] + state["score_away"]
+            pace_surprise  = h1_combined - (game_meta.get("total_line", np.nan) / 2.0)
+            margin_surprise = current_margin - game_meta["pregame_spread"] * (t / 40.0)
+
+            # eFG% diff (team1 - team2)
+            if state["efg_diff"] is not None:
+                efg_pct_diff = sign * state["efg_diff"]
+            else:
+                efg_pct_diff = np.nan
+
+            # ORB margin (team1 - team2 offensive rebounds)
+            orb_margin = sign * state["orb_margin"]
+            if orb_margin == 0 and state["orb_home"] == 0 and state["orb_away"] == 0:
+                orb_margin = np.nan  # no data yet
+
+            # TO margin: positive = team1 protecting ball (team2 has more TOs)
+            # From compute_game_state_at: to_margin = to_away - to_home (positive = home protecting ball)
+            to_margin = sign * state["to_margin"]
+            if to_margin == 0 and state["to_home"] == 0 and state["to_away"] == 0:
+                to_margin = np.nan
+
+            # Momentum: positive = team1 gaining margin
+            momentum_5pos  = sign * state["momentum_5pos"]
+            momentum_10pos = sign * state["momentum_10pos"]
+
+            possessions = state["possessions_home"] + state["possessions_away"]
+
+            row = {
+                # Identifiers (not features)
+                "year":         game_meta["year"],
+                "game_date":    game_meta["game_date"],
+                "team1":        game_meta["team1"],
+                "team2":        game_meta["team2"],
+                "time_elapsed": t,
+                # LIVE_FEATURES
+                "pregame_spread":    game_meta["pregame_spread"],
+                "h1_margin":         current_margin,
+                "h1_combined":       float(h1_combined),
+                "time_elapsed_pct":  t / 40.0,
+                "time_remaining_pct": 1.0 - t / 40.0,
+                "efg_pct_diff":      efg_pct_diff,
+                "orb_margin":        float(orb_margin),
+                "to_margin":         float(to_margin),
+                "pace_surprise":     float(pace_surprise) if not np.isnan(pace_surprise) else np.nan,
+                "margin_surprise":   float(margin_surprise),
+                "barthag_diff":      game_meta.get("barthag_diff", np.nan),
+                "adj_o_diff":        game_meta.get("adj_o_diff", np.nan),
+                "adj_d_diff":        game_meta.get("adj_d_diff", np.nan),
+                "seed_diff":         game_meta.get("seed_diff", np.nan),
+                "round_number":      game_meta.get("round_number", np.nan),
+                "pace_live":         float(state["pace_live"]) if state["pace_live"] else np.nan,
+                "momentum_5pos":     float(momentum_5pos),
+                "momentum_10pos":    float(momentum_10pos),
+                "possessions":       float(possessions) if possessions > 0 else np.nan,
+                # Target
+                "actual_final_margin": actual_final_margin,
+            }
+            rows.append(row)
+        except Exception:
+            continue
+
+    return rows
+
+
+def _build_halftime_row_from_hs(hs_row: pd.Series, game_meta: dict) -> dict | None:
+    """
+    Build a single halftime training row from halftime_scores (fallback for games without PBP).
+    """
+    try:
+        h1_score1  = float(hs_row.get("h1_score1", np.nan))
+        h1_score2  = float(hs_row.get("h1_score2", np.nan))
+        if np.isnan(h1_score1) or np.isnan(h1_score2):
+            return None
+
+        h1_margin   = h1_score1 - h1_score2
+        h1_combined = h1_score1 + h1_score2
+        t           = 20.0
+
+        efg1 = pd.to_numeric(hs_row.get("h1_efg1"), errors="coerce")
+        efg2 = pd.to_numeric(hs_row.get("h1_efg2"), errors="coerce")
+        efg_pct_diff = (float(efg1) - float(efg2)) if (not np.isnan(float(efg1) if efg1 is not None else np.nan) and not np.isnan(float(efg2) if efg2 is not None else np.nan)) else np.nan
+
+        orb1 = pd.to_numeric(hs_row.get("h1_orb1"), errors="coerce")
+        orb2 = pd.to_numeric(hs_row.get("h1_orb2"), errors="coerce")
+        orb_margin = (float(orb1) - float(orb2)) if (orb1 is not None and orb2 is not None) else np.nan
+
+        to1 = pd.to_numeric(hs_row.get("h1_to1"), errors="coerce")
+        to2 = pd.to_numeric(hs_row.get("h1_to2"), errors="coerce")
+        to_margin = (float(to2) - float(to1)) if (to1 is not None and to2 is not None) else np.nan
+
+        pregame_spread = game_meta["pregame_spread"]
+        total_line     = game_meta.get("total_line", np.nan)
+        pace_surprise  = h1_combined - (total_line / 2.0) if not np.isnan(total_line) else np.nan
+        margin_surprise = h1_margin - pregame_spread * 0.5
+
+        return {
+            "year":         game_meta["year"],
+            "game_date":    game_meta["game_date"],
+            "team1":        game_meta["team1"],
+            "team2":        game_meta["team2"],
+            "time_elapsed": t,
+            "pregame_spread":     pregame_spread,
+            "h1_margin":          h1_margin,
+            "h1_combined":        h1_combined,
+            "time_elapsed_pct":   t / 40.0,
+            "time_remaining_pct": 1.0 - t / 40.0,
+            "efg_pct_diff":       efg_pct_diff,
+            "orb_margin":         orb_margin,
+            "to_margin":          to_margin,
+            "pace_surprise":      pace_surprise,
+            "margin_surprise":    margin_surprise,
+            "barthag_diff":       game_meta.get("barthag_diff", np.nan),
+            "adj_o_diff":         game_meta.get("adj_o_diff", np.nan),
+            "adj_d_diff":         game_meta.get("adj_d_diff", np.nan),
+            "seed_diff":          game_meta.get("seed_diff", np.nan),
+            "round_number":       game_meta.get("round_number", np.nan),
+            # PBP-only features are NaN for fallback rows
+            "pace_live":          np.nan,
+            "momentum_5pos":      np.nan,
+            "momentum_10pos":     np.nan,
+            "possessions":        np.nan,
+            "actual_final_margin": game_meta["actual_final_margin"],
+        }
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Main assembly function
+# ---------------------------------------------------------------------------
 
 def build_live_training_data(
     train_years: list[int] | None = None,
@@ -46,30 +259,22 @@ def build_live_training_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Returns (train_df, val_df) where val_year games are held out.
-    train_years defaults to all TOURNAMENT_YEARS except val_year.
-    Both DataFrames contain all LIVE_FEATURES columns plus the target
-    column 'actual_final_margin'.
 
-    Convention: team1 = better seed (lower seed number).
-    Where historical_results has seed1 <= seed2, team1 is already the
-    better seed and the margin is score1 - score2.  When seed1 > seed2
-    the roles are swapped and the sign of the margin is inverted so that
-    a positive final margin always means the better seed won.
+    For games with PBP data: generates 19 training rows per game at
+    2-minute intervals (TRAINING_TIMEPOINTS).
+    For games without PBP: generates 1 halftime row from halftime_scores.
+
+    Convention: team1 = better seed (lower seed number), positive margin = team1 won.
     """
     if train_years is None:
         train_years = [y for y in TOURNAMENT_YEARS if y != val_year]
 
     all_years = sorted(set(train_years) | {val_year})
+    placeholders = ",".join("?" * len(all_years))
 
     # ------------------------------------------------------------------
     # 1. Load source tables
     # ------------------------------------------------------------------
-    placeholders = ",".join("?" * len(all_years))
-
-    hs = query_df(
-        f"SELECT * FROM halftime_scores WHERE year IN ({placeholders})",
-        params=all_years,
-    )
     hr = query_df(
         f"SELECT * FROM historical_results WHERE year IN ({placeholders})",
         params=all_years,
@@ -78,184 +283,231 @@ def build_live_training_data(
         f"SELECT * FROM historical_lines WHERE year IN ({placeholders})",
         params=all_years,
     )
+    hs = query_df(
+        f"SELECT * FROM halftime_scores WHERE year IN ({placeholders})",
+        params=all_years,
+    )
     tr = query_df(
         f"SELECT year, team, barthag, adj_o, adj_d FROM torvik_ratings WHERE year IN ({placeholders})",
         params=all_years,
     )
 
-    if hs.empty:
-        raise ValueError(
-            "halftime_scores table is empty — run live data ingestion first."
-        )
     if hr.empty:
-        raise ValueError(
-            "historical_results table is empty — run build_historical_dataset() first."
-        )
+        raise ValueError("historical_results table is empty.")
 
     # ------------------------------------------------------------------
-    # 2. Merge halftime_scores + historical_results on (year, game_date, team1, team2)
+    # 2. Merge historical_results + historical_lines + torvik_ratings
     # ------------------------------------------------------------------
     join_keys = ["year", "game_date", "team1", "team2"]
 
     hr_slim = hr[
         ["year", "game_date", "team1", "team2",
-         "score1", "score2", "seed1", "seed2", "round_number"]
+         "score1", "score2", "seed1", "seed2", "round_number", "espn_game_id"]
     ].copy()
 
-    merged = hs.merge(hr_slim, on=join_keys, how="inner")
-    if merged.empty:
-        raise ValueError(
-            "No rows after joining halftime_scores to historical_results. "
-            "Verify that team1/team2 naming is consistent across tables."
-        )
+    if not hl.empty:
+        hl_slim = hl[
+            ["year", "game_date", "team1", "team2",
+             "spread_favorite", "spread_line", "total_line"]
+        ].copy()
+        merged = hr_slim.merge(hl_slim, on=join_keys, how="left")
+    else:
+        merged = hr_slim.copy()
+        merged["spread_favorite"] = np.nan
+        merged["spread_line"]     = np.nan
+        merged["total_line"]      = np.nan
+
+    if not hs.empty:
+        # Drop espn_game_id from halftime_scores to avoid column collision
+        # (espn_game_id already comes from historical_results)
+        hs_merge = hs.drop(columns=["espn_game_id"], errors="ignore")
+        merged = merged.merge(hs_merge, on=join_keys, how="left")
+
+    # Torvik ratings
+    if not tr.empty:
+        tr_t1 = tr.rename(columns={"team": "team1", "barthag": "barthag1",
+                                    "adj_o": "adj_o1", "adj_d": "adj_d1"})
+        tr_t2 = tr.rename(columns={"team": "team2", "barthag": "barthag2",
+                                    "adj_o": "adj_o2", "adj_d": "adj_d2"})
+        merged = merged.merge(tr_t1[["year", "team1", "barthag1", "adj_o1", "adj_d1"]],
+                              on=["year", "team1"], how="left")
+        merged = merged.merge(tr_t2[["year", "team2", "barthag2", "adj_o2", "adj_d2"]],
+                              on=["year", "team2"], how="left")
+    else:
+        for col in ["barthag1", "barthag2", "adj_o1", "adj_o2", "adj_d1", "adj_d2"]:
+            merged[col] = np.nan
 
     # ------------------------------------------------------------------
-    # 3. Merge historical_lines
+    # 3. Orientation: team1 = better seed (lower seed number)
     # ------------------------------------------------------------------
-    hl_slim = hl[
-        ["year", "game_date", "team1", "team2",
-         "spread_favorite", "spread_line", "total_line"]
-    ].copy()
-
-    merged = merged.merge(hl_slim, on=join_keys, how="left")
-
-    # ------------------------------------------------------------------
-    # 4. Merge torvik_ratings for team1 and team2
-    # ------------------------------------------------------------------
-    tr_t1 = tr.rename(columns={
-        "team": "team1",
-        "barthag": "barthag1",
-        "adj_o": "adj_o1",
-        "adj_d": "adj_d1",
-    })
-    tr_t2 = tr.rename(columns={
-        "team": "team2",
-        "barthag": "barthag2",
-        "adj_o": "adj_o2",
-        "adj_d": "adj_d2",
-    })
-
-    merged = merged.merge(tr_t1[["year", "team1", "barthag1", "adj_o1", "adj_d1"]],
-                          on=["year", "team1"], how="left")
-    merged = merged.merge(tr_t2[["year", "team2", "barthag2", "adj_o2", "adj_d2"]],
-                          on=["year", "team2"], how="left")
-
-    # ------------------------------------------------------------------
-    # 5. Normalise orientation: team1 = better seed (lower seed number)
-    # ------------------------------------------------------------------
-    # seed1, seed2 come from historical_results; default to 8 if missing
     merged["seed1"] = merged["seed1"].fillna(8).astype(int)
     merged["seed2"] = merged["seed2"].fillna(8).astype(int)
-
-    # When seed1 > seed2, team2 is actually the better seed.
-    # Flip all team1/team2 columns so team1 is always the better seed.
     needs_flip = merged["seed1"] > merged["seed2"]
 
-    def _swap(df: pd.DataFrame, col1: str, col2: str) -> None:
-        """Swap values in col1 and col2 where needs_flip is True (in-place)."""
-        tmp = df.loc[needs_flip, col1].copy()
-        df.loc[needs_flip, col1] = df.loc[needs_flip, col2]
-        df.loc[needs_flip, col2] = tmp
+    def _swap(col1: str, col2: str) -> None:
+        tmp = merged.loc[needs_flip, col1].copy()
+        merged.loc[needs_flip, col1] = merged.loc[needs_flip, col2]
+        merged.loc[needs_flip, col2] = tmp
 
     for c1, c2 in [
         ("seed1", "seed2"),
         ("barthag1", "barthag2"),
         ("adj_o1", "adj_o2"),
         ("adj_d1", "adj_d2"),
-        ("h1_score1", "h1_score2"),
-        ("h1_efg1", "h1_efg2"),
-        ("h1_orb1", "h1_orb2"),
-        ("h1_to1", "h1_to2"),
         ("score1", "score2"),
     ]:
         if c1 in merged.columns and c2 in merged.columns:
-            _swap(merged, c1, c2)
+            _swap(c1, c2)
 
-    # spread_favorite references team name — flip sign of spread_line when needed
-    # (spread_line is positive, spread_favorite = name of favored team)
-    # After the seed flip, team1 is the better-seeded team.  We want pregame_spread
-    # to be positive when team1 is favored (i.e. spread_favorite == team1).
-    # Note: team1/team2 columns themselves are NOT swapped — only score/stats columns
-    # above are swapped so the orientation is consistent.  We do NOT rename team columns
-    # because the join keys have already been used.
+    # After flip, h1_score1/h1_score2 in halftime_scores need same treatment
+    for c1, c2 in [("h1_score1", "h1_score2"), ("h1_efg1", "h1_efg2"),
+                   ("h1_orb1", "h1_orb2"), ("h1_to1", "h1_to2")]:
+        if c1 in merged.columns and c2 in merged.columns:
+            _swap(c1, c2)
 
-    # ------------------------------------------------------------------
-    # 6. Compute features
-    # ------------------------------------------------------------------
-    df = merged.copy()
-
-    # pregame_spread: positive = team1 favored
-    df["pregame_spread"] = np.where(
-        df["spread_favorite"] == df["team1"],
-        df["spread_line"],
-        -df["spread_line"],
+    # pregame_spread: positive = team1 (better seed) favored
+    merged["pregame_spread"] = np.where(
+        merged.get("spread_favorite") == merged["team1"],
+        merged.get("spread_line", np.nan),
+        -merged.get("spread_line", np.nan),
     )
-    # If spread_line is NaN the result will also be NaN — that is intentional
-    # (we will drop NaN-target rows later but keep NaN-feature rows for the
-    # calibrator which handles NaN features via XGBoost's native missing-value path)
-
-    df["h1_score1"] = pd.to_numeric(df["h1_score1"], errors="coerce")
-    df["h1_score2"] = pd.to_numeric(df["h1_score2"], errors="coerce")
-
-    df["h1_margin"] = df["h1_score1"] - df["h1_score2"]
-    df["h1_combined"] = df["h1_score1"] + df["h1_score2"]
-
-    # Time — always halftime for historical data
-    df["time_elapsed_pct"] = 20.0 / 40.0   # 0.5
-    df["time_remaining_pct"] = 1.0 - df["time_elapsed_pct"]  # 0.5
-
-    # Box-score efficiency — left as NaN if absent
-    df["h1_efg1"] = pd.to_numeric(df.get("h1_efg1"), errors="coerce")
-    df["h1_efg2"] = pd.to_numeric(df.get("h1_efg2"), errors="coerce")
-    df["efg_pct_diff"] = df["h1_efg1"] - df["h1_efg2"]
-
-    df["h1_orb1"] = pd.to_numeric(df.get("h1_orb1"), errors="coerce")
-    df["h1_orb2"] = pd.to_numeric(df.get("h1_orb2"), errors="coerce")
-    df["orb_margin"] = df["h1_orb1"] - df["h1_orb2"]
-
-    df["h1_to1"] = pd.to_numeric(df.get("h1_to1"), errors="coerce")
-    df["h1_to2"] = pd.to_numeric(df.get("h1_to2"), errors="coerce")
-    # Reversed: positive = team1 protecting the ball
-    df["to_margin"] = df["h1_to2"] - df["h1_to1"]
-
-    # Pace surprise: actual H1 combined vs projected H1 pace
-    df["pace_surprise"] = df["h1_combined"] - (df["total_line"] / 2.0)
-
-    # Margin surprise: actual H1 margin vs expected H1 margin
-    df["margin_surprise"] = df["h1_margin"] - (df["pregame_spread"] * 0.5)
 
     # Torvik differentials (team1 - team2)
-    df["barthag_diff"] = df["barthag1"] - df["barthag2"]
-    df["adj_o_diff"] = df["adj_o1"] - df["adj_o2"]
-    df["adj_d_diff"] = df["adj_d1"] - df["adj_d2"]   # positive = team1 worse defense
+    merged["barthag_diff"] = merged["barthag1"] - merged["barthag2"]
+    merged["adj_o_diff"]   = merged["adj_o1"]   - merged["adj_o2"]
+    merged["adj_d_diff"]   = merged["adj_d1"]   - merged["adj_d2"]
+    merged["seed_diff"]    = merged["seed1"]     - merged["seed2"]
 
-    df["seed_diff"] = df["seed1"] - df["seed2"]  # negative = team1 is bigger favorite
-
-    df["round_number"] = pd.to_numeric(df["round_number"], errors="coerce")
-
-    # ------------------------------------------------------------------
-    # 7. Target variable
-    # ------------------------------------------------------------------
-    df["actual_final_margin"] = (
-        pd.to_numeric(df["score1"], errors="coerce")
-        - pd.to_numeric(df["score2"], errors="coerce")
+    merged["actual_final_margin"] = (
+        pd.to_numeric(merged["score1"], errors="coerce")
+        - pd.to_numeric(merged["score2"], errors="coerce")
     )
 
+    # Drop rows with no final score
+    merged = merged.dropna(subset=["actual_final_margin"])
+
     # ------------------------------------------------------------------
-    # 8. Select and drop rows where target is unknown
+    # 4. Check which games have PBP data
     # ------------------------------------------------------------------
-    output_cols = LIVE_FEATURES + ["actual_final_margin", "year",
-                                   "game_date", "team1", "team2"]
-    # Keep only columns that exist
+    pbp_game_ids = set()
+    try:
+        pbp_available = query_df(
+            "SELECT DISTINCT espn_game_id FROM pbp_plays WHERE espn_game_id IS NOT NULL"
+        )
+        if not pbp_available.empty:
+            pbp_game_ids = set(pbp_available["espn_game_id"].astype(str).tolist())
+    except Exception:
+        pass
+
+    print(f"[live_train_data] PBP data available for {len(pbp_game_ids)} games")
+
+    # ------------------------------------------------------------------
+    # 5. Build training rows game by game
+    # ------------------------------------------------------------------
+    all_rows = []
+    pbp_game_count = 0
+    hs_game_count  = 0
+
+    hs_index = {}
+    if not hs.empty and "espn_game_id" in hs.columns:
+        for _, row in hs.iterrows():
+            hs_index[str(row.get("espn_game_id", ""))] = row
+    # Also index hs by (year, game_date, team1, team2) as fallback
+    hs_key_index = {}
+    if not hs.empty:
+        for _, row in hs.iterrows():
+            k = (int(row["year"]), str(row["game_date"]), str(row["team1"]), str(row["team2"]))
+            hs_key_index[k] = row
+
+    for _, game in merged.iterrows():
+        espn_id = str(game.get("espn_game_id", "") or "")
+
+        game_meta = {
+            "year":                int(game["year"]),
+            "game_date":           str(game["game_date"]),
+            "team1":               str(game["team1"]),
+            "team2":               str(game["team2"]),
+            "pregame_spread":      float(game["pregame_spread"]) if not pd.isna(game["pregame_spread"]) else 0.0,
+            "total_line":          float(game["total_line"]) if not pd.isna(game.get("total_line", np.nan)) else np.nan,
+            "barthag_diff":        float(game["barthag_diff"]) if not pd.isna(game["barthag_diff"]) else np.nan,
+            "adj_o_diff":          float(game["adj_o_diff"])   if not pd.isna(game["adj_o_diff"])   else np.nan,
+            "adj_d_diff":          float(game["adj_d_diff"])   if not pd.isna(game["adj_d_diff"])   else np.nan,
+            "seed_diff":           float(game["seed_diff"]),
+            "round_number":        float(game["round_number"]) if not pd.isna(game.get("round_number", np.nan)) else np.nan,
+            "actual_final_margin": float(game["actual_final_margin"]),
+        }
+
+        # Try PBP path
+        if espn_id and espn_id != "nan" and espn_id in pbp_game_ids:
+            # Determine if team1 is the ESPN home team
+            # Use final score comparison: compare ESPN home_score to score1
+            try:
+                last_play = query_df(
+                    "SELECT home_score, away_score FROM pbp_plays "
+                    "WHERE espn_game_id = ? ORDER BY time_elapsed DESC LIMIT 1",
+                    params=[espn_id],
+                )
+                if not last_play.empty:
+                    espn_home_final = int(last_play.iloc[0]["home_score"])
+                    espn_away_final = int(last_play.iloc[0]["away_score"])
+                    score1 = int(game["score1"])
+                    score2 = int(game["score2"])
+                    # If espn_home_final matches score1, team1=home; else team1=away
+                    team1_is_home = abs(espn_home_final - score1) < abs(espn_home_final - score2)
+                else:
+                    team1_is_home = True
+            except Exception:
+                team1_is_home = True
+
+            rows = _build_pbp_rows_for_game(
+                espn_game_id=espn_id,
+                game_meta=game_meta,
+                team1_is_home=team1_is_home,
+                actual_final_margin=game_meta["actual_final_margin"],
+            )
+            if rows:
+                all_rows.extend(rows)
+                pbp_game_count += 1
+                continue
+
+        # Fallback: halftime_scores
+        hs_row = None
+        if espn_id and espn_id in hs_index:
+            hs_row = hs_index[espn_id]
+        else:
+            k = (game_meta["year"], game_meta["game_date"], game_meta["team1"], game_meta["team2"])
+            hs_row = hs_key_index.get(k)
+
+        if hs_row is not None:
+            row = _build_halftime_row_from_hs(hs_row, game_meta)
+            if row is not None:
+                all_rows.append(row)
+                hs_game_count += 1
+
+    print(
+        f"[live_train_data] {pbp_game_count} games × 19 timepoints (PBP)  "
+        f"+ {hs_game_count} games × 1 timepoint (halftime fallback)  "
+        f"= {len(all_rows)} total training rows"
+    )
+
+    if not all_rows:
+        raise ValueError(
+            "No training rows assembled — ensure pbp_plays or halftime_scores is populated."
+        )
+
+    # ------------------------------------------------------------------
+    # 6. Build DataFrame and split train/val
+    # ------------------------------------------------------------------
+    df = pd.DataFrame(all_rows)
+    df = df.sort_values(["year", "game_date"]).reset_index(drop=True)
+
+    output_cols = LIVE_FEATURES + ["actual_final_margin", "year", "game_date", "team1", "team2"]
     output_cols = [c for c in output_cols if c in df.columns]
     df = df[output_cols].copy()
     df = df.dropna(subset=["actual_final_margin"])
 
-    # Sort by year so TimeSeriesSplit works correctly downstream
-    df = df.sort_values("year").reset_index(drop=True)
-
     train_df = df[df["year"].isin(train_years)].copy()
-    val_df = df[df["year"] == val_year].copy()
+    val_df   = df[df["year"] == val_year].copy()
 
     print(
         f"[live_train_data] train rows: {len(train_df)} "
