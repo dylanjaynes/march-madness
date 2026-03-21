@@ -197,9 +197,30 @@ def project_game_live(
             _s2 = int(_seeds[_seeds["team"] == team2]["seed"].iloc[0]) if not _seeds[_seeds["team"] == team2].empty else 8
             seed_diff = _s1 - _s2
 
+            # ── Orientation: flip to better-seed perspective ──────────────────────
+            # The model was trained with team1 = better seed (lower seed number).
+            # If team2 has the lower seed, flip all signed features so the model
+            # sees the familiar orientation; we negate the output back afterward.
+            flipped = _s2 < _s1
+            if flipped:
+                current_margin  = -current_margin
+                efg_diff        = -efg_diff
+                orb_margin      = -orb_margin
+                to_margin       = -to_margin
+                momentum_5pos   = -momentum_5pos
+                momentum_10pos  = -momentum_10pos
+                pregame_spread  = -pregame_spread
+                barthag_diff    = -barthag_diff
+                adj_o_diff      = -adj_o_diff
+                adj_d_diff      = -adj_d_diff
+                seed_diff       = _s2 - _s1   # better_seed# - worse_seed# (always negative)
+
             h1_combined    = (score1 or 0) + (score2 or 0)
             pace_surprise  = h1_combined - (projected_total / 2.0)
             margin_surprise = current_margin - (pregame_spread * (time_elapsed / 40.0))
+            if flipped:
+                pace_surprise   = -pace_surprise
+                # margin_surprise is auto-correct since current_margin/pregame_spread are flipped
 
             # Full 19-feature vector matching LIVE_FEATURES order
             feat_vec = [
@@ -226,6 +247,9 @@ def project_game_live(
             features = np.array([feat_vec])
             raw = float(_live_model.predict(features)[0])
             projected_margin = float(_live_cal.predict([raw])[0]) if _live_cal is not None else raw
+            # Flip output back to team1 perspective if we reoriented above
+            if flipped:
+                projected_margin = -projected_margin
             uses_trained = True
         except Exception as _ex:
             projected_margin = formula_projected_margin(
