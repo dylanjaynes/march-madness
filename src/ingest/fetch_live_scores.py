@@ -33,13 +33,18 @@ def _norm(name: str) -> str:
 
 
 def _parse_date(iso_str: str) -> str:
-    """Convert ISO 8601 UTC timestamp → local date string YYYY-MM-DD."""
+    """Convert ISO 8601 UTC timestamp → ET date string YYYY-MM-DD.
+
+    Tournament games tip off in the afternoon/evening ET. A 9:45 PM ET game
+    is past midnight UTC (next day), so we must convert to ET to get the
+    correct local game date.
+    ET = UTC-4 during DST (March–November).
+    """
     try:
+        from datetime import timedelta
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        # Convert to ET (UTC-4 during DST, UTC-5 standard)
-        # Games tipoff in afternoon/evening ET — use UTC date minus offset
-        # Simpler: just use the UTC date; it's close enough for tournament
-        return dt.strftime("%Y-%m-%d")
+        dt_et = dt - timedelta(hours=4)  # UTC → ET (DST, March tournament)
+        return dt_et.strftime("%Y-%m-%d")
     except Exception:
         return iso_str[:10]
 
