@@ -139,7 +139,7 @@ def _load_backtest_predictions(year: int) -> pd.DataFrame:
     return year_df.reset_index(drop=True)
 
 
-@st.cache_data(ttl=120, show_spinner="Grading games…")
+@st.cache_data(ttl=600, show_spinner="Grading games…")
 def load_graded_data(year: int) -> pd.DataFrame:
     """
     Grade all completed tournament games for `year`.
@@ -403,26 +403,33 @@ if df.empty:
     st.warning(f"No gradeable data found for {selected_year}.")
     st.stop()
 
-# Apply filters
-view = df.copy()
+# Apply filters (main tournament only — First Four shown separately below)
+view = main_df.copy()
 if not show_no_line:
     view = view[view["has_line"]]
 if min_edge > 0:
     view = view[view["spread_edge"].notna() & (view["spread_edge"].abs() >= min_edge)]
 
 
-# ── Summary KPIs ───────────────────────────────────────────────────────────────
-graded   = df[df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
+# ── Separate NCAAT (First Four, round=0) from main tournament ─────────────────
+ncaat_df = df[df["round_num"] == 0]
+main_df  = df[df["round_num"] >  0]
+
+# ── Summary KPIs (main tournament only) ───────────────────────────────────────
+graded   = main_df[main_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
 graded_3 = graded[graded["spread_edge"].abs() >= 3]
-ou_all   = df[df["ou_result"].isin(["WIN", "LOSS", "PUSH"])]
+ou_all   = main_df[main_df["ou_result"].isin(["WIN", "LOSS", "PUSH"])]
 ou_3     = ou_all[ou_all["total_edge"].abs() >= 3]
 
 roi_3    = _roi(graded_3["ats_result"].tolist())
 ou_roi_3 = _roi(ou_3["ou_result"].tolist())
 
+if not ncaat_df.empty:
+    st.caption(f"ℹ️ {len(ncaat_df)} First Four game(s) excluded from summary stats — shown separately below.")
+
 c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Games",         len(df))
-c2.metric("w/ Lines",      int(df["has_line"].sum()))
+c1.metric("Games",         len(main_df))
+c2.metric("w/ Lines",      int(main_df["has_line"].sum()))
 c3.metric("ATS (All)",     _record_str(graded["ats_result"].tolist()))
 c4.metric("ATS (Edge≥3)",  _record_str(graded_3["ats_result"].tolist()))
 c5.metric("ATS ROI (E≥3)", f"{roi_3:.1f}%" if not np.isnan(roi_3) else "—")
@@ -455,7 +462,8 @@ if not comp_graded.empty:
 st.divider()
 
 
-# ── Round breakdown ────────────────────────────────────────────────────────────
+# ── Round breakdown (main tournament only) ────────────────────────────────────
+_ROUND_LABELS = {0: "First Four", **ROUND_NAMES}
 round_rows = []
 for rn in range(1, 7):
     rdf = graded[graded["round_num"] == rn]
@@ -466,7 +474,7 @@ for rn in range(1, 7):
     p = (rdf["ats_result"] == "PUSH").sum()
     roi = _roi(rdf["ats_result"].tolist())
     round_rows.append({
-        "Round":  ROUND_NAMES.get(rn, f"R{rn}"),
+        "Round":  _ROUND_LABELS.get(rn, f"R{rn}"),
         "W": int(w), "L": int(l), "P": int(p),
         "ATS %":  f"{w/(w+l)*100:.0f}%" if (w+l) > 0 else "—",
         "ROI (-110)": f"{roi:.1f}%" if not np.isnan(roi) else "—",
@@ -620,7 +628,10 @@ for date_str, tab in zip(dates, date_tabs):
                     f"⚠️ Large-spread game ({mkt_a:+.1f} pts) — "
                     "model edge on blowout mismatches is unreliable"
                 )
-            st.divider()
+            st.markdown(
+                "<hr style='margin:6px 0;border:0;border-top:1px solid #2a2a2a'>",
+                unsafe_allow_html=True,
+            )
 
 
 # ── Running totals ─────────────────────────────────────────────────────────────
@@ -629,7 +640,7 @@ if len(dates) > 1:
     cum_w = cum_l = cum_p = 0
     run_rows = []
     for d in dates:
-        day_g = df[(df["game_date"] == d) & df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
+        day_g = main_df[(main_df["game_date"] == d) & main_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
         w = int((day_g["ats_result"] == "WIN").sum())
         l = int((day_g["ats_result"] == "LOSS").sum())
         p = int((day_g["ats_result"] == "PUSH").sum())
@@ -643,3 +654,73 @@ if len(dates) > 1:
             "Day ROI":    f"{day_roi:.1f}%" if not np.isnan(day_roi) else "—",
         })
     st.dataframe(pd.DataFrame(run_rows).set_index("Date"), use_container_width=True)
+
+
+# ── First Four / NCAAT section ─────────────────────────────────────────────────
+if not ncaat_df.empty:
+    st.divider()
+    st.subheader("🏀 First Four (NCAAT Play-In Games)")
+    st.caption("These play-in games are graded separately — model is optimized for seeded bracket matchups.")
+
+    ncaat_graded = ncaat_df[ncaat_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
+    if not ncaat_graded.empty:
+        nc1, nc2, nc3 = st.columns(3)
+        nc1.metric("First Four Games", len(ncaat_df))
+        nc2.metric("w/ Lines", int(ncaat_df["has_line"].sum()))
+        nc3.metric("ATS", _record_str(ncaat_graded["ats_result"].tolist()))
+        st.markdown("")
+
+    ncaat_view = ncaat_df.copy()
+    if not show_no_line:
+        ncaat_view = ncaat_view[ncaat_view["has_line"]]
+
+    _SEP = "<hr style='margin:6px 0;border:0;border-top:1px solid #2a2a2a'>"
+    for _, row in ncaat_view.iterrows():
+        score_a = row.get("score_a")
+        score_b = row.get("score_b")
+        final_str = f"{int(score_a)} – {int(score_b)}" if pd.notna(score_a) and pd.notna(score_b) else "TBD"
+        winner_team = row["team_a"] if row["actual_margin_a"] > 0 else row["team_b"]
+
+        def sp_str_nc(team, val):
+            if val is None or not pd.notna(val): return "—"
+            return f"{team} {-val:+.1f}"
+
+        model_sp  = sp_str_nc(row["team_a"], row.get("model_spread"))
+        market_sp = sp_str_nc(row["team_a"], row.get("market_spread_a"))
+        edge_val  = row.get("spread_edge")
+        edge_str  = f"{edge_val:+.1f} pts" if pd.notna(edge_val) and edge_val is not None else "—"
+        ats = row["ats_result"]
+
+        nc1, nc2, nc3, nc4 = st.columns([3, 2, 2, 1])
+        with nc1:
+            wa = " ✓" if winner_team == row["team_a"] else ""
+            wb = " ✓" if winner_team == row["team_b"] else ""
+            st.markdown(
+                f"<div style='padding:4px 0'>"
+                f"<b>{row['team_a']}{wa}</b> vs <b>{row['team_b']}{wb}</b><br>"
+                f"<span style='color:#ccc;font-size:0.85rem'>Final: {final_str}</span></div>",
+                unsafe_allow_html=True,
+            )
+        with nc2:
+            st.markdown(
+                f"<div style='text-align:center;padding:4px'>"
+                f"<div style='color:#aaa;font-size:0.72rem'>MODEL / LINE</div>"
+                f"<div style='font-size:0.9rem'>{model_sp}</div>"
+                f"<div style='font-size:0.9rem;color:#bbb'>{market_sp}</div></div>",
+                unsafe_allow_html=True,
+            )
+        with nc3:
+            st.markdown(
+                f"<div style='text-align:center;padding:4px'>"
+                f"<div style='color:#aaa;font-size:0.72rem'>EDGE</div>"
+                f"<div style='font-size:0.9rem'>{edge_str}</div></div>",
+                unsafe_allow_html=True,
+            )
+        with nc4:
+            st.markdown(
+                f"<div style='text-align:center;padding:4px'>"
+                f"<div style='color:#aaa;font-size:0.72rem'>ATS</div>"
+                f"<div style='font-size:1.05rem'>{_result_html(ats)}</div></div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(_SEP, unsafe_allow_html=True)
