@@ -199,8 +199,14 @@ def ingest_historical_odds_for_year(year: int) -> int:
             spread_fav = t1_raw if (spread_team1 is not None and spread_team1 > 0) else t2_raw
 
             with db_conn() as conn:
+                # Remove any prior rows for this team pair regardless of game_date
+                # (live/snapshot sources may have stored under a different date)
                 conn.execute(
-                    """INSERT OR REPLACE INTO historical_lines
+                    "DELETE FROM historical_lines WHERE year = ? AND team1 = ? AND team2 = ?",
+                    [year, t1_raw, t2_raw],
+                )
+                conn.execute(
+                    """INSERT INTO historical_lines
                        (year, game_date, team1, team2, spread_favorite,
                         spread_line, total_line, open_spread, open_total,
                         ats_result, ou_result, source)

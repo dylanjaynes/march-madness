@@ -173,12 +173,21 @@ def load_graded_data(year: int) -> pd.DataFrame:
     )
 
     # Build lookup: frozenset{canonical_lower, canonical_lower} → row
+    # Source priority: odds_api_historical / sbro beat live/snapshot sources.
+    # Multiple rows can exist for the same game (different game_dates from
+    # UTC vs ET offset); always prefer the authoritative pre-game closing line.
+    SOURCE_RANK = {"sbro": 0, "odds_api_historical": 1, "odds_api_live": 2, "odds_history_snapshot": 3}
     lines_lookup = {}
     for _, lr in lines.iterrows():
         t1n = normalize_team_name(str(lr["team1"])).lower()
         t2n = normalize_team_name(str(lr["team2"])).lower()
         k = frozenset({t1n, t2n})
-        lines_lookup[k] = lr
+        src = str(lr.get("source", ""))
+        existing = lines_lookup.get(k)
+        if existing is None:
+            lines_lookup[k] = lr
+        elif SOURCE_RANK.get(src, 99) < SOURCE_RANK.get(str(existing.get("source", "")), 99):
+            lines_lookup[k] = lr
 
     # ── 2b. Fallback: odds_history (pre-game snapshots captured before tip-off) ─
     # Fills gaps when the Odds API /scores endpoint has no bookmaker data for a game.
