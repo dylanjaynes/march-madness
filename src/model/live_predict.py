@@ -153,6 +153,17 @@ def project_game_live(
 
     # PBP features (from fetch_live_game_states_with_pbp enrichment)
     pbp_available   = snapshot.get("pbp_available", False)
+
+    # ESPN live scoreboard omits ORB and TO — fall back to PBP-derived counts
+    if pbp_available:
+        if orb1 is None:
+            orb1 = snapshot.get("orb_home")
+        if orb2 is None:
+            orb2 = snapshot.get("orb_away")
+        if to1 is None:
+            to1 = snapshot.get("to_home")
+        if to2 is None:
+            to2 = snapshot.get("to_away")
     pace_live       = snapshot.get("pace_live", 0.0) or 0.0
     momentum_5pos   = snapshot.get("momentum_5pos", 0.0) or 0.0
     momentum_10pos  = snapshot.get("momentum_10pos", 0.0) or 0.0
@@ -175,6 +186,8 @@ def project_game_live(
     from src.utils.db import query_df as _qdf
 
     uses_trained = False
+    flipped = False  # set True if we reorient to better-seed perspective below
+    _pregame_spread_display = pregame_spread  # preserve original for breakdown display
     if _use_trained and _live_model is not None:
         try:
             # Torvik ratings for barthag/adj_o/adj_d differentials
@@ -218,9 +231,8 @@ def project_game_live(
             h1_combined    = (score1 or 0) + (score2 or 0)
             pace_surprise  = h1_combined - (projected_total / 2.0)
             margin_surprise = current_margin - (pregame_spread * (time_elapsed / 40.0))
-            if flipped:
-                pace_surprise   = -pace_surprise
-                # margin_surprise is auto-correct since current_margin/pregame_spread are flipped
+            # margin_surprise is auto-correct since current_margin/pregame_spread are flipped
+            # pace_surprise is team-agnostic (total scoring vs projected total) — do NOT flip
 
             # Full 19-feature vector matching LIVE_FEATURES order
             feat_vec = [
@@ -256,6 +268,8 @@ def project_game_live(
                 current_margin, pregame_spread, time_elapsed, time_remaining,
                 efg_diff, orb_margin, to_margin,
             )
+            if flipped:
+                projected_margin = -projected_margin
     else:
         projected_margin = formula_projected_margin(
             current_margin, pregame_spread, time_elapsed, time_remaining,
@@ -340,7 +354,7 @@ def project_game_live(
         "time_elapsed":       time_elapsed,
         "time_remaining":     time_remaining,
         "breakdown": {
-            "pregame_spread":   pregame_spread,
+            "pregame_spread":   _pregame_spread_display,
             "time_weight_adj":  round(time_weight_adj, 2),
             "efg_adj":          round(efg_adj_val, 2),
             "orb_adj":          round(orb_adj_val, 2),
