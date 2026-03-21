@@ -124,6 +124,104 @@ def _fetch_and_store_results(year: int) -> int:
     return len(df)
 
 
+# ── NIT data loader ────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=600)
+def load_nit_data(year: int) -> pd.DataFrame:
+    """
+    Grade all completed NIT games for `year` using the same model and
+    sign conventions as load_graded_data().
+    team_a = team with better Torvik barthag (proxy for lower seed).
+    """
+    results = query_df(
+        "SELECT * FROM nit_results WHERE year = ? AND score1 IS NOT NULL AND score2 IS NOT NULL "
+        "ORDER BY game_date, round_number",
+        params=[year],
+    )
+    if results.empty:
+        return pd.DataFrame()
+
+    lines = query_df("SELECT * FROM nit_lines WHERE year = ?", params=[year])
+    SOURCE_RANK = {"odds_api_historical": 0, "sbro": 0, "odds_api_live": 2, "odds_history_snapshot": 3}
+    lines_lookup = {}
+    for _, lr in lines.iterrows():
+        t1n = normalize_team_name(str(lr["team1"])).lower()
+        t2n = normalize_team_name(str(lr["team2"])).lower()
+        k = frozenset({t1n, t2n})
+        existing = lines_lookup.get(k)
+        src = str(lr.get("source", ""))
+        if existing is None or SOURCE_RANK.get(src, 99) < SOURCE_RANK.get(str(existing.get("source", "")), 99):
+            lines_lookup[k] = lr
+
+    rows = []
+    for _, g in results.iterrows():
+        t1, t2 = str(g["team1"]), str(g["team2"])
+        s1, s2 = int(g["score1"]), int(g["score2"])
+
+        # team_a = better Torvik team (higher barthag); fallback to team1
+        try:
+            tor = query_df(
+                "SELECT team, barthag FROM torvik_ratings WHERE season = ? AND team IN (?, ?)",
+                params=[year, t1, t2],
+            )
+            if not tor.empty and len(tor) == 2:
+                bmap = dict(zip(tor["team"], tor["barthag"]))
+                team_a = t1 if bmap.get(t1, 0) >= bmap.get(t2, 0) else t2
+            else:
+                team_a = t1
+        except Exception:
+            team_a = t1
+        team_b = t2 if team_a == t1 else t1
+
+        actual_margin_a = (s1 - s2) if team_a == t1 else (s2 - s1)
+        actual_total = s1 + s2
+
+        try:
+            proj = project_game(team_a, team_b, year)
+            model_spread = round(proj["projected_spread"], 1)
+            model_total  = round(proj["projected_total"], 1)
+        except Exception:
+            model_spread = model_total = None
+
+        t1n = normalize_team_name(t1).lower()
+        t2n = normalize_team_name(t2).lower()
+        lr = lines_lookup.get(frozenset({t1n, t2n}))
+        market_spread_a = market_total = None
+        if lr is not None and pd.notna(lr.get("spread_line")):
+            raw = float(lr["spread_line"])
+            market_spread_a = raw if t1.lower() == team_a.lower() else -raw
+        if lr is not None and pd.notna(lr.get("total_line")):
+            market_total = float(lr["total_line"])
+
+        spread_edge = round(model_spread - market_spread_a, 1) if (model_spread is not None and market_spread_a is not None) else None
+        total_edge  = round(model_total  - market_total,   1) if (model_total  is not None and market_total  is not None) else None
+
+        ats = _grade_ats(actual_margin_a, market_spread_a, spread_edge)
+        ou  = _grade_ou(actual_total, market_total, total_edge)
+
+        rows.append({
+            "game_date":      g["game_date"],
+            "round_name":     g["round_name"],
+            "team_a":         team_a,
+            "team_b":         team_b,
+            "score_a":        s1 if team_a == t1 else s2,
+            "score_b":        s2 if team_a == t1 else s1,
+            "actual_margin_a": actual_margin_a,
+            "actual_total":   actual_total,
+            "model_spread":   model_spread,
+            "model_total":    model_total,
+            "market_spread_a": market_spread_a,
+            "market_total":   market_total,
+            "spread_edge":    spread_edge,
+            "total_edge":     total_edge,
+            "ats_result":     ats,
+            "ou_result":      ou,
+            "has_line":       market_spread_a is not None,
+        })
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
 # ── Core data loader ───────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=120)
@@ -793,3 +891,112 @@ if not ncaat_df.empty:
                 unsafe_allow_html=True,
             )
         st.markdown(_SEP, unsafe_allow_html=True)
+
+
+# ── NIT Section ────────────────────────────────────────────────────────────────
+st.divider()
+with st.expander("🏀 NIT — Model vs Closing Lines", expanded=(selected_year == current_year)):
+    nit_years = sorted(
+        [y for y in [2019, 2021, 2022, 2023, 2024, 2025, 2026] if y <= selected_year],
+        reverse=True,
+    )
+
+    nit_year = st.selectbox("NIT Year", nit_years, key="nit_year_select")
+
+    nit_df = load_nit_data(nit_year)
+
+    if nit_df.empty:
+        st.info(
+            f"No NIT data for {nit_year}. "
+            "Click **📥 Fetch results** in the sidebar to load NIT games."
+        )
+    else:
+        nit_graded  = nit_df[nit_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
+        nit_ou_all  = nit_df[nit_df["ou_result"].isin(["WIN", "LOSS", "PUSH"])]
+        nit_roi     = _roi(nit_graded["ats_result"].tolist())
+        nit_ou_roi  = _roi(nit_ou_all["ou_result"].tolist())
+
+        nc1, nc2, nc3, nc4, nc5 = st.columns(5)
+        nc1.metric("Games",    len(nit_df))
+        nc2.metric("w/ Lines", int(nit_df["has_line"].sum()))
+        nc3.metric("ATS",      _record_str(nit_graded["ats_result"].tolist()))
+        nc4.metric("ATS ROI",  f"{nit_roi:.1f}%" if not np.isnan(nit_roi) else "—")
+        nc5.metric("O/U",      _record_str(nit_ou_all["ou_result"].tolist(), with_pct=False))
+
+        st.markdown("")
+
+        # Round breakdown
+        for rnd in sorted(nit_df["round_name"].unique()):
+            rnd_df = nit_df[nit_df["round_name"] == rnd]
+            rnd_graded = rnd_df[rnd_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
+            rec = _record_str(rnd_graded["ats_result"].tolist())
+            roi = _roi(rnd_graded["ats_result"].tolist())
+            roi_str = f" · ROI {roi:.1f}%" if not np.isnan(roi) else ""
+            st.caption(f"**{rnd}** — {rec}{roi_str}")
+
+        st.markdown("")
+
+        _SEP2 = "<hr style='margin:6px 0;border:0;border-top:1px solid #2a2a2a'>"
+
+        nit_view = nit_df.copy()
+        if not show_no_line:
+            nit_view = nit_view[nit_view["has_line"]]
+
+        for _, row in nit_view.iterrows():
+            score_a = row.get("score_a")
+            score_b = row.get("score_b")
+            final_str = f"{int(score_a)} – {int(score_b)}" if pd.notna(score_a) and pd.notna(score_b) else "TBD"
+            winner_team = row["team_a"] if row["actual_margin_a"] > 0 else row["team_b"]
+
+            def _sp(team, val):
+                if val is None or not pd.notna(val): return "—"
+                return f"{team} {-val:+.1f}"
+
+            model_sp  = _sp(row["team_a"], row.get("model_spread"))
+            market_sp = _sp(row["team_a"], row.get("market_spread_a"))
+            edge_val  = row.get("spread_edge")
+            edge_str  = f"{edge_val:+.1f} pts" if pd.notna(edge_val) and edge_val is not None else "—"
+            ats = row["ats_result"]
+            ou  = row["ou_result"]
+
+            c1, c2, c3, c4, c5 = st.columns([3, 1, 2, 1, 1])
+            with c1:
+                wa = " ✓" if winner_team == row["team_a"] else ""
+                wb = " ✓" if winner_team == row["team_b"] else ""
+                st.markdown(
+                    f"<div style='padding:4px 0'>"
+                    f"<b>{row['team_a']}{wa}</b> vs <b>{row['team_b']}{wb}</b>"
+                    f"<span style='color:#888;font-size:0.78rem'> ({row['round_name']})</span><br>"
+                    f"<span style='color:#ccc;font-size:0.85rem'>Final: {final_str}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.markdown(
+                    f"<div style='text-align:center;padding:4px'>"
+                    f"<div style='color:#aaa;font-size:0.72rem'>ACTUAL</div>"
+                    f"<div style='font-weight:bold'>{row['actual_margin_a']:+.0f}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                st.markdown(
+                    f"<div style='text-align:center;padding:4px'>"
+                    f"<div style='color:#aaa;font-size:0.72rem'>MODEL / LINE</div>"
+                    f"<div style='font-size:0.9rem'>{model_sp}</div>"
+                    f"<div style='font-size:0.9rem;color:#bbb'>{market_sp}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            with c4:
+                st.markdown(
+                    f"<div style='text-align:center;padding:4px'>"
+                    f"<div style='color:#aaa;font-size:0.72rem'>ATS</div>"
+                    f"<div style='font-size:1.05rem'>{_result_html(ats)}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            with c5:
+                st.markdown(
+                    f"<div style='text-align:center;padding:4px'>"
+                    f"<div style='color:#aaa;font-size:0.72rem'>O/U</div>"
+                    f"<div style='font-size:1.05rem'>{_result_html(ou)}</div></div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown(_SEP2, unsafe_allow_html=True)

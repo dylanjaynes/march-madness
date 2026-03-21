@@ -321,6 +321,14 @@ def fetch_and_store_scores(year: int, days_from: int = 3) -> dict:
     # Step 3: Historical closing lines for all dates now in historical_results
     lines_stored = ingest_historical_odds_for_year(year)
 
+    # Step 4: NIT results + lines (same year, runs silently)
+    try:
+        from src.ingest.nit import ingest_nit_results, ingest_nit_lines
+        ingest_nit_results(years=[year])
+        ingest_nit_lines(years=[year])
+    except Exception as e:
+        print(f"  [odds] NIT ingest error: {e}")
+
     return {
         "results": espn_inserted + summary.get("results_inserted", 0),
         "lines":   lines_stored,
