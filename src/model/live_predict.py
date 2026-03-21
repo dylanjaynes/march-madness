@@ -169,6 +169,10 @@ def project_game_live(
     momentum_10pos  = snapshot.get("momentum_10pos", 0.0) or 0.0
     possessions     = snapshot.get("possessions_home", 0) + snapshot.get("possessions_away", 0)
 
+    # FT and foul features from PBP parser
+    ft_made_diff = snapshot.get("ft_made_diff")  # ftm_home - ftm_away (team1 perspective)
+    foul_diff    = snapshot.get("foul_diff")      # fouls_away - fouls_home (team1 perspective)
+
     # Use PBP-computed stats if available (more accurate than ESPN box score)
     if pbp_available and snapshot.get("efg_diff") is not None:
         efg_diff   = float(snapshot["efg_diff"]) * 100.0  # convert decimal to pct-points
@@ -223,6 +227,10 @@ def project_game_live(
                 momentum_5pos   = -momentum_5pos
                 momentum_10pos  = -momentum_10pos
                 pregame_spread  = -pregame_spread
+                if ft_made_diff is not None:
+                    ft_made_diff = -ft_made_diff
+                if foul_diff is not None:
+                    foul_diff = -foul_diff
                 barthag_diff    = -barthag_diff
                 adj_o_diff      = -adj_o_diff
                 adj_d_diff      = -adj_d_diff
@@ -234,17 +242,19 @@ def project_game_live(
             # margin_surprise is auto-correct since current_margin/pregame_spread are flipped
             # pace_surprise is team-agnostic (total scoring vs projected total) — do NOT flip
 
-            # Full 19-feature vector matching LIVE_FEATURES order
+            # Full 21-feature vector matching LIVE_FEATURES order
             feat_vec = [
                 pregame_spread,                                          # pregame_spread
                 current_margin,                                          # h1_margin
                 float(h1_combined),                                      # h1_combined
                 time_elapsed / 40.0,                                     # time_elapsed_pct
                 time_remaining / 40.0,                                   # time_remaining_pct
-                efg_diff if efg_diff != 0.0 else float("nan"),           # efg_pct_diff
-                orb_margin if orb_margin != 0.0 else float("nan"),       # orb_margin
-                to_margin  if to_margin  != 0.0 else float("nan"),       # to_margin
-                pace_surprise,                                           # pace_surprise
+                efg_diff if efg_diff != 0.0 else float("nan"),                      # efg_pct_diff
+                orb_margin if orb_margin != 0.0 else float("nan"),                  # orb_margin
+                to_margin  if to_margin  != 0.0 else float("nan"),                  # to_margin
+                float(ft_made_diff) if ft_made_diff is not None else float("nan"),  # ft_made_diff
+                float(foul_diff)    if foul_diff    is not None else float("nan"),  # foul_diff
+                pace_surprise,                                                       # pace_surprise
                 margin_surprise,                                         # margin_surprise
                 barthag_diff,                                            # barthag_diff
                 adj_o_diff,                                              # adj_o_diff

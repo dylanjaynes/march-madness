@@ -36,6 +36,8 @@ LIVE_FEATURES: list[str] = [
     "efg_pct_diff",
     "orb_margin",
     "to_margin",
+    "ft_made_diff",      # FTM_team1 - FTM_team2 (positive = team1 scoring more from line)
+    "foul_diff",         # fouls_team2 - fouls_team1 (positive = team1 in better foul position)
     "pace_surprise",
     "margin_surprise",
     "barthag_diff",
@@ -143,6 +145,16 @@ def _build_pbp_rows_for_game(
             if to_margin == 0 and state["to_home"] == 0 and state["to_away"] == 0:
                 to_margin = np.nan
 
+            # FT made diff: team1 FTM - team2 FTM (positive = team1 scoring more from line)
+            ft_made_diff = sign * state.get("ft_made_diff", 0)
+            if ft_made_diff == 0 and state.get("fta_home", 0) == 0 and state.get("fta_away", 0) == 0:
+                ft_made_diff = np.nan
+
+            # Foul diff: team2 fouls - team1 fouls (positive = team1 in better foul position)
+            foul_diff = sign * state.get("foul_diff", 0)
+            if foul_diff == 0 and state.get("fouls_home", 0) == 0 and state.get("fouls_away", 0) == 0:
+                foul_diff = np.nan
+
             # Momentum: positive = team1 gaining margin
             momentum_5pos  = sign * state["momentum_5pos"]
             momentum_10pos = sign * state["momentum_10pos"]
@@ -165,6 +177,8 @@ def _build_pbp_rows_for_game(
                 "efg_pct_diff":      efg_pct_diff,
                 "orb_margin":        float(orb_margin),
                 "to_margin":         float(to_margin),
+                "ft_made_diff":      float(ft_made_diff) if not (isinstance(ft_made_diff, float) and np.isnan(ft_made_diff)) else np.nan,
+                "foul_diff":         float(foul_diff) if not (isinstance(foul_diff, float) and np.isnan(foul_diff)) else np.nan,
                 "pace_surprise":     float(pace_surprise) if not np.isnan(pace_surprise) else np.nan,
                 "margin_surprise":   float(margin_surprise),
                 "barthag_diff":      game_meta.get("barthag_diff", np.nan),
@@ -231,6 +245,8 @@ def _build_halftime_row_from_hs(hs_row: pd.Series, game_meta: dict) -> dict | No
             "efg_pct_diff":       efg_pct_diff,
             "orb_margin":         orb_margin,
             "to_margin":          to_margin,
+            "ft_made_diff":       np.nan,   # not available in halftime_scores fallback
+            "foul_diff":          np.nan,   # not available in halftime_scores fallback
             "pace_surprise":      pace_surprise,
             "margin_surprise":    margin_surprise,
             "barthag_diff":       game_meta.get("barthag_diff", np.nan),

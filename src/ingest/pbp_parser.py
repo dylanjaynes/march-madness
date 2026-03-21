@@ -205,6 +205,9 @@ def compute_game_state_at(
     fgm_away = fga_away = tpm_away = 0
     to_home = to_away = 0
     orb_home = orb_away = 0
+    ftm_home = ftm_away = 0
+    fta_home = fta_away = 0
+    fouls_home = fouls_away = 0
 
     # Possession counts (possession ends on MADE_2, MADE_3, TURNOVER, REBOUND_DEF)
     poss_home = poss_away = 0
@@ -244,6 +247,26 @@ def compute_game_state_at(
                 orb_home += 1
             else:
                 orb_away += 1
+
+        if et == "MADE_FT":
+            if tm == "home":
+                ftm_home += 1
+                fta_home += 1
+            else:
+                ftm_away += 1
+                fta_away += 1
+
+        if et == "MISSED_FT":
+            if tm == "home":
+                fta_home += 1
+            else:
+                fta_away += 1
+
+        if et == "FOUL":
+            if tm == "home":
+                fouls_home += 1
+            else:
+                fouls_away += 1
 
     # eFG% = (FGM + 0.5 * 3PM) / FGA
     efg_home = ((fgm_home + 0.5 * tpm_home) / fga_home) if fga_home > 0 else None
@@ -294,6 +317,12 @@ def compute_game_state_at(
     momentum_5pos  = _momentum(5)
     momentum_10pos = _momentum(10)
 
+    # FT and foul derived features
+    # ft_made_diff: home FTM - away FTM (positive = home scoring more from the line)
+    ft_made_diff = ftm_home - ftm_away
+    # foul_diff: away fouls - home fouls (positive = home team in better foul situation)
+    foul_diff    = fouls_away - fouls_home
+
     return {
         "time_elapsed":     at_time_elapsed,
         "time_remaining":   time_remaining,
@@ -309,6 +338,14 @@ def compute_game_state_at(
         "to_home":          to_home,
         "to_away":          to_away,
         "to_margin":        to_margin,
+        "ftm_home":         ftm_home,
+        "ftm_away":         ftm_away,
+        "fta_home":         fta_home,
+        "fta_away":         fta_away,
+        "fouls_home":       fouls_home,
+        "fouls_away":       fouls_away,
+        "ft_made_diff":     ft_made_diff,
+        "foul_diff":        foul_diff,
         "possessions_home": poss_home,
         "possessions_away": poss_away,
         "pace_live":        pace_live,
