@@ -173,14 +173,36 @@ def load_graded_data(year: int) -> pd.DataFrame:
     )
 
     # Build lookup: frozenset{canonical_lower, canonical_lower} → row
-    # normalize_team_name resolves aliases (e.g. "Omaha" → "Nebraska-Omaha")
-    # so lines and results tables match even when source spellings differ.
     lines_lookup = {}
     for _, lr in lines.iterrows():
         t1n = normalize_team_name(str(lr["team1"])).lower()
         t2n = normalize_team_name(str(lr["team2"])).lower()
         k = frozenset({t1n, t2n})
         lines_lookup[k] = lr
+
+    # ── 2b. Fallback: odds_history (pre-game snapshots captured before tip-off) ─
+    # Fills gaps when the Odds API /scores endpoint has no bookmaker data for a game.
+    # odds_history.spread_home convention: negative = home favored (standard betting).
+    oh_lookup = {}  # frozenset{norm_lower, norm_lower} → {"spread_home": float, "total": float}
+    try:
+        oh = query_df(
+            "SELECT home_team, away_team, spread_home, total_line, pull_timestamp "
+            "FROM odds_history ORDER BY pull_timestamp DESC"
+        )
+        seen = set()
+        for _, oh_row in oh.iterrows():
+            hn = normalize_team_name(str(oh_row["home_team"])).lower()
+            an = normalize_team_name(str(oh_row["away_team"])).lower()
+            k = frozenset({hn, an})
+            if k not in seen and k not in lines_lookup:
+                oh_lookup[k] = {
+                    "home_norm": hn,
+                    "spread_home": oh_row["spread_home"],
+                    "total_line":  oh_row["total_line"],
+                }
+                seen.add(k)
+    except Exception:
+        pass
 
     # ── 3. OOS backtest predictions lookup (keyed by frozenset of team names) ──
     bt_preds = _load_backtest_predictions(year)
@@ -268,16 +290,29 @@ def load_graded_data(year: int) -> pd.DataFrame:
             model_total  = round(proj["projected_total"], 1)
 
         # ── Pre-game market line from team_a perspective ───────────────────────
-        # historical_lines.spread_line convention: positive = team1 favored
         t1n = normalize_team_name(t1).lower()
         t2n = normalize_team_name(t2).lower()
         lr = lines_lookup.get(frozenset({t1n, t2n}))
         market_spread_a = market_total = None
         if lr is not None and pd.notna(lr.get("spread_line")):
             raw = float(lr["spread_line"])
+            # historical_lines convention: positive = team1 favored
             market_spread_a = raw if t1.lower() == team_a.lower() else -raw
         if lr is not None and pd.notna(lr.get("total_line")):
             market_total = float(lr["total_line"])
+
+        # Fallback: odds_history snapshot taken before tip-off
+        if market_spread_a is None:
+            oh_entry = oh_lookup.get(frozenset({t1n, t2n}))
+            if oh_entry is not None and oh_entry.get("spread_home") is not None:
+                # odds_history.spread_home: negative = home favored (betting convention)
+                # Convert to team_a perspective: positive = team_a favored
+                sh = float(oh_entry["spread_home"])
+                home_is_team_a = (oh_entry["home_norm"] == normalize_team_name(team_a).lower())
+                # spread_home negative means home favored → internal convention positive for favorite
+                market_spread_a = -sh if home_is_team_a else sh
+            if oh_entry is not None and oh_entry.get("total_line") is not None and market_total is None:
+                market_total = float(oh_entry["total_line"])
 
         spread_edge = round(model_spread - market_spread_a, 1) if market_spread_a is not None else None
         total_edge  = round(model_total  - market_total,   1) if (model_total is not None and market_total is not None) else None
@@ -358,6 +393,18 @@ with st.sidebar:
                 st.rerun()
             except Exception as e:
                 st.error(f"Fetch failed: {e}")
+
+    if st.button("📸 Snapshot today's lines", use_container_width=True,
+                 help="Capture pre-game odds before tip-off. Run this BEFORE games start each day."):
+        with st.spinner("Fetching current odds…"):
+            from src.ingest.odds import poll_and_store_odds
+            try:
+                poll_and_store_odds()
+                st.cache_data.clear()
+                st.success("Lines snapshot saved — re-fetch results to apply.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Snapshot failed: {e}")
 
     if st.button("🔄 Refresh cache", use_container_width=True):
         st.cache_data.clear()
