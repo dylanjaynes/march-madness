@@ -906,10 +906,15 @@ with st.expander("🏀 NIT — Model vs Closing Lines", expanded=(selected_year 
     nit_df = load_nit_data(nit_year)
 
     if nit_df.empty:
-        st.info(
-            f"No NIT data for {nit_year}. "
-            "Click **📥 Fetch results** in the sidebar to load NIT games."
-        )
+        with st.spinner(f"Fetching {nit_year} NIT results…"):
+            try:
+                from src.ingest.nit import ingest_nit_results, ingest_nit_lines
+                ingest_nit_results(years=[nit_year])
+                ingest_nit_lines(years=[nit_year])
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"NIT fetch failed: {e}")
     else:
         nit_graded  = nit_df[nit_df["ats_result"].isin(["WIN", "LOSS", "PUSH"])]
         nit_ou_all  = nit_df[nit_df["ou_result"].isin(["WIN", "LOSS", "PUSH"])]
