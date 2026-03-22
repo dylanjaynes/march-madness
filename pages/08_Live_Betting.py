@@ -196,15 +196,22 @@ def _format_spread(val, team):
     return f"{team} {val:+.1f}"
 
 
-def _stat_color(val1, val2, bet_team, team1, team2):
-    """Green if stat favors the bet team, red if not, grey if unclear."""
-    if val1 is None or val2 is None or bet_team is None:
-        return "#aaa"
-    diff = val1 - val2
-    if bet_team == team1:
-        return "#2ecc71" if diff > 0 else "#e74c3c"
+def _stat_colors(val1, val2, higher_is_better=True):
+    """
+    Returns (color1, color2) — each team colored independently.
+    Green = better than opponent, red = worse, grey = equal or missing.
+    """
+    if val1 is None or val2 is None:
+        return "#aaa", "#aaa"
+    if val1 == val2:
+        return "#aaa", "#aaa"
+    if higher_is_better:
+        c1 = "#2ecc71" if val1 > val2 else "#e74c3c"
+        c2 = "#2ecc71" if val2 > val1 else "#e74c3c"
     else:
-        return "#2ecc71" if diff < 0 else "#e74c3c"
+        c1 = "#2ecc71" if val1 < val2 else "#e74c3c"
+        c2 = "#2ecc71" if val2 < val1 else "#e74c3c"
+    return c1, c2
 
 
 def render_game_card(pred: dict, bankroll_: int, sizing_: str):
@@ -284,16 +291,13 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
     def _fmt(v, fmt=".0f"):
         return f"{v:{fmt}}" if v is not None else "—"
 
-    efg_color   = _stat_color(efg1, efg2, bet_team, team1, team2)
-    orb_color   = _stat_color(orb1, orb2, bet_team, team1, team2)
-    # Fewer turnovers is better — flip the sign for color
-    to_color    = _stat_color(-(to1 or 0), -(to2 or 0), bet_team, team1, team2)
-    # More FTM is better
-    ftm_color   = _stat_color(ftm1, ftm2, bet_team, team1, team2)
-    # Fewer fouls is better — flip sign
-    foul_color  = _stat_color(-(fouls1 or 0), -(fouls2 or 0), bet_team, team1, team2)
+    efg_c1,  efg_c2  = _stat_colors(efg1, efg2, higher_is_better=True)
+    orb_c1,  orb_c2  = _stat_colors(orb1, orb2, higher_is_better=True)
+    to_c1,   to_c2   = _stat_colors(to1,  to2,  higher_is_better=False)
+    ftm_c1,  ftm_c2  = _stat_colors(ftm1, ftm2, higher_is_better=True)
+    foul_c1, foul_c2 = _stat_colors(fouls1, fouls2, higher_is_better=False)
 
-    def _stat_row(label, v1, v2, color, fmt=".0f"):
+    def _stat_row(label, v1, v2, c1, c2, fmt=".0f"):
         f1 = f"{v1:{fmt}}" if v1 is not None else "—"
         f2 = f"{v2:{fmt}}" if v2 is not None else "—"
         pct = "%" if fmt == ".1f" else ""
@@ -301,8 +305,8 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
             f"<div style='display:flex;justify-content:space-between;padding:3px 0;"
             f"border-bottom:1px solid #333;font-size:0.8rem'>"
             f"<span style='color:#aaa;flex:1'>{label}</span>"
-            f"<span style='color:{color};flex:1;text-align:center'>{f1}{pct}</span>"
-            f"<span style='color:{color};flex:1;text-align:center'>{f2}{pct}</span>"
+            f"<span style='color:{c1};flex:1;text-align:center'>{f1}{pct}</span>"
+            f"<span style='color:{c2};flex:1;text-align:center'>{f2}{pct}</span>"
             f"</div>"
         )
 
@@ -319,7 +323,7 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
             f"</div>"
         )
 
-    def _ft_row(label, made1, att1, made2, att2, color):
+    def _ft_row(label, made1, att1, made2, att2, c1, c2):
         def _ft_fmt(m, a):
             if m is None and a is None:
                 return "—"
@@ -332,8 +336,8 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
             f"<div style='display:flex;justify-content:space-between;padding:3px 0;"
             f"border-bottom:1px solid #333;font-size:0.8rem'>"
             f"<span style='color:#aaa;flex:1'>{label}</span>"
-            f"<span style='color:{color};flex:1;text-align:center'>{f1}</span>"
-            f"<span style='color:{color};flex:1;text-align:center'>{f2}</span>"
+            f"<span style='color:{c1};flex:1;text-align:center'>{f1}</span>"
+            f"<span style='color:{c2};flex:1;text-align:center'>{f2}</span>"
             f"</div>"
         )
 
@@ -344,12 +348,12 @@ def render_game_card(pred: dict, bankroll_: int, sizing_: str):
         f"<span style='color:#aaa;flex:1;text-align:center'>{team1}</span>"
         f"<span style='color:#aaa;flex:1;text-align:center'>{team2}</span>"
         f"</div>"
-        + _stat_row("eFG% (live)", efg1, efg2, efg_color, ".1f")
-        + _stat_row("eFG% (season)", efg_s1, efg_s2, "#ccc", ".1f")
-        + _stat_row("Off Reb", orb1, orb2, orb_color)
-        + _stat_row("Turnovers", to1, to2, to_color)
-        + _ft_row("FT (M/A)", ftm1, fta1, ftm2, fta2, ftm_color)
-        + _stat_row("Fouls", fouls1, fouls2, foul_color)
+        + _stat_row("eFG% (live)", efg1, efg2, efg_c1, efg_c2, ".1f")
+        + _stat_row("eFG% (season)", efg_s1, efg_s2, "#ccc", "#ccc", ".1f")
+        + _stat_row("Off Reb", orb1, orb2, orb_c1, orb_c2)
+        + _stat_row("Turnovers", to1, to2, to_c1, to_c2)
+        + _ft_row("FT (M/A)", ftm1, fta1, ftm2, fta2, ftm_c1, ftm_c2)
+        + _stat_row("Fouls", fouls1, fouls2, foul_c1, foul_c2)
         + f"</div>"
         + momentum_html
     )
