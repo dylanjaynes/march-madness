@@ -1,0 +1,64 @@
+name: Poll Live Lines
+
+on:
+  schedule:
+    # Every 5 minutes — minimum GitHub Actions interval
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # allow manual trigger
+
+concurrency:
+  group: poll-live-lines
+  cancel-in-progress: true  # skip queued runs if a new one fires
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check game window
+        id: window_check
+        run: |
+          HOUR=$(date -u +%H)
+          MONTH=$(date -u +%m)
+          DAY=$(date -u +%d)
+          # UTC 15:00–05:00 = ET 11am–1am (covers all game windows)
+          # Run if hour >= 15 OR hour < 5
+          if [ "$HOUR" -ge 15 ] || [ "$HOUR" -lt 5 ]; then
+            echo "in_window=true" >> $GITHUB_OUTPUT
+          else
+            echo "in_window=false" >> $GITHUB_OUTPUT
+            echo "Outside game window (UTC $HOUR:xx), skipping."
+          fi
+
+      - name: Checkout repo
+        if: steps.window_check.outputs.in_window == 'true'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        if: steps.window_check.outputs.in_window == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        if: steps.window_check.outputs.in_window == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Poll live lines
+        if: steps.window_check.outputs.in_window == 'true'
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python3 -m src.ingest.poll_live_lines
+
+      - name: Commit DB changes
+        if: steps.window_check.outputs.in_window == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/db/mm_model.db
+          git diff --cached --quiet || git commit -m "chore: live lines poll $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase origin main
+          git push
