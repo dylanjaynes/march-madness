@@ -19,7 +19,7 @@ from src.model.predict import (
 from src.utils.db import db_conn, query_df
 
 
-st.set_page_config(page_title="Live Games", page_icon="📡", layout="wide")
+st.set_page_config(page_title="Live and Upcoming Games", page_icon="📡", layout="wide")
 
 # Custom CSS: fix tab text colors and general readability
 st.markdown("""
@@ -62,7 +62,7 @@ with st.sidebar:
     date_filter = st.sidebar.radio(
         "Show games",
         ["Today", "Tomorrow", "All upcoming"],
-        index=0,
+        index=2,
     )
 
 
