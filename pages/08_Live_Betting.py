@@ -49,7 +49,7 @@ current_year = TOURNAMENT_YEARS[-1]
 with st.sidebar:
     st.header("⚙️ Settings")
     bankroll = st.number_input(
-        "Bankroll ($)", min_value=50, max_value=1_000_000, value=1000, step=100
+        "Bankroll ($)", min_value=50, max_value=1_000_000, value=200, step=50
     )
     sizing = st.radio("Kelly sizing", ["Half Kelly", "Full Kelly", "Flat ($100)"])
     min_edge = st.slider("Min |edge| (pts)", 0.0, 15.0, 0.0, 0.5)
